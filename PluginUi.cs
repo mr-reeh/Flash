@@ -1,0 +1,189 @@
+using System;
+using System.Numerics;
+using Dalamud.Bindings.ImGui;
+using Lumina.Excel.Sheets;
+
+namespace Flash;
+
+public class PluginUi
+{
+    private readonly Plugin plugin;
+
+    public bool IsOpen;
+
+    private string newEmoteSearch = string.Empty;
+    private string newDesignBase64 = string.Empty;
+
+    public PluginUi(Plugin plugin)
+    {
+        this.plugin = plugin;
+    }
+
+    public void Draw()
+    {
+        if (!this.IsOpen)
+            return;
+
+        ImGui.SetNextWindowSize(new Vector2(560, 480), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Emote Gear Config", ref this.IsOpen))
+        {
+            ImGui.End();
+            return;
+        }
+
+        var enabled = this.plugin.Configuration.PluginEnabled;
+        if (ImGui.Checkbox("Plugin enabled", ref enabled))
+        {
+            this.plugin.Configuration.PluginEnabled = enabled;
+            this.plugin.Configuration.Save();
+        }
+
+        var glamourerReady = this.plugin.Glamourer.IsAvailable();
+        ImGui.SameLine();
+        ImGui.TextColored(
+            glamourerReady ? new Vector4(0.4f, 1f, 0.4f, 1f) : new Vector4(1f, 0.4f, 0.4f, 1f),
+            glamourerReady ? "Glamourer: connected" : "Glamourer: not detected");
+
+        ImGui.Separator();
+        ImGui.TextWrapped("Add a mapping: find the emote, paste a Glamourer design string " +
+                           "(Glamourer -> right-click a saved design -> Copy to Clipboard), then Add.");
+
+        this.DrawAddRow();
+
+        ImGui.Separator();
+        this.DrawEntryTable();
+
+        ImGui.End();
+    }
+
+    private void DrawAddRow()
+    {
+        ImGui.InputTextWithHint("##emoteSearch", "Emote name (e.g. Dance, Salute)", ref this.newEmoteSearch, 64);
+
+        var sheet = Plugin.DataManager.GetExcelSheet<Emote>();
+        Emote? matched = null;
+
+        if (!string.IsNullOrWhiteSpace(this.newEmoteSearch) && sheet != null)
+        {
+            foreach (var row in sheet)
+            {
+                var name = row.Name.ExtractText();
+                if (string.IsNullOrEmpty(name))
+                    continue;
+
+                if (name.Contains(this.newEmoteSearch, StringComparison.OrdinalIgnoreCase))
+                {
+                    matched = row;
+                    break;
+                }
+            }
+        }
+
+        if (matched != null)
+        {
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), $"Matched: {matched.Value.Name.ExtractText()} (Id {matched.Value.RowId})");
+        }
+        else if (!string.IsNullOrWhiteSpace(this.newEmoteSearch))
+        {
+            ImGui.TextColored(new Vector4(1f, 0.6f, 0.4f, 1f), "No exact match yet - keep typing.");
+        }
+
+        ImGui.InputTextMultiline("##designBase64", ref this.newDesignBase64, 8192, new Vector2(-1, 60));
+
+        ImGui.BeginDisabled(matched == null || string.IsNullOrWhiteSpace(this.newDesignBase64));
+        if (ImGui.Button("Add mapping"))
+        {
+            this.plugin.Configuration.Entries.Add(new EmoteGearEntry
+            {
+                EmoteId = matched!.Value.RowId,
+                EmoteName = matched.Value.Name.ExtractText(),
+                GlamourerDesignBase64 = this.newDesignBase64.Trim(),
+                RevertAfterEmote = true,
+                RevertDelaySeconds = 3.0f,
+                LocalPlayerOnly = true,
+                Enabled = true,
+            });
+            this.plugin.Configuration.Save();
+
+            this.newEmoteSearch = string.Empty;
+            this.newDesignBase64 = string.Empty;
+        }
+
+        ImGui.EndDisabled();
+    }
+
+    private void DrawEntryTable()
+    {
+        var entries = this.plugin.Configuration.Entries;
+
+        if (entries.Count == 0)
+        {
+            ImGui.TextDisabled("No mappings configured yet.");
+            return;
+        }
+
+        if (!ImGui.BeginTable("EmoteGearTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            return;
+
+        ImGui.TableSetupColumn("On");
+        ImGui.TableSetupColumn("Emote");
+        ImGui.TableSetupColumn("Revert after");
+        ImGui.TableSetupColumn("Delay (s)");
+        ImGui.TableSetupColumn("");
+        ImGui.TableHeadersRow();
+
+        var toRemove = -1;
+
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            ImGui.PushID(i);
+            ImGui.TableNextRow();
+
+            ImGui.TableNextColumn();
+            var rowEnabled = entry.Enabled;
+            if (ImGui.Checkbox("##enabled", ref rowEnabled))
+            {
+                entry.Enabled = rowEnabled;
+                this.plugin.Configuration.Save();
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"{entry.EmoteName} ({entry.EmoteId})");
+
+            ImGui.TableNextColumn();
+            var revert = entry.RevertAfterEmote;
+            if (ImGui.Checkbox("##revert", ref revert))
+            {
+                entry.RevertAfterEmote = revert;
+                this.plugin.Configuration.Save();
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.BeginDisabled(!entry.RevertAfterEmote);
+            var delay = entry.RevertDelaySeconds;
+            ImGui.SetNextItemWidth(80);
+            if (ImGui.DragFloat("##delay", ref delay, 0.1f, 0.0f, 60.0f, "%.1f"))
+            {
+                entry.RevertDelaySeconds = delay;
+                this.plugin.Configuration.Save();
+            }
+
+            ImGui.EndDisabled();
+
+            ImGui.TableNextColumn();
+            if (ImGui.Button("Remove"))
+                toRemove = i;
+
+            ImGui.PopID();
+        }
+
+        ImGui.EndTable();
+
+        if (toRemove >= 0)
+        {
+            entries.RemoveAt(toRemove);
+            this.plugin.Configuration.Save();
+        }
+    }
+}

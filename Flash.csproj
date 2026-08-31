@@ -1,0 +1,25 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Version>0.1.0.0</Version>
+    <Description>Automatically applies a Glamourer design when a specified emote is used.</Description>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>Flash</RootNamespace>
+    <AssemblyName>Flash</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Dalamud, FFXIVClientStructs, Dalamud.Bindings.ImGui, Lumina, etc. are all supplied
+      by the Dalamud.NET.Sdk automatically - no manual <Reference> entries needed for
+      those. This is pinned to 15.0.0 / net10.0-windows to match a Dalamud 15.0.3.2
+      install. If your local Dalamud reports a different version (check the /xldev menu
+      or %AppData%\XIVLauncher\addon\Hooks\dev\Dalamud.dll's file properties), update
+      both the Sdk version and TargetFramework here to match.
+    -->
+  </ItemGroup>
+
+</Project>
