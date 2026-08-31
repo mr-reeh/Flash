@@ -1,6 +1,6 @@
 [
   {
-    "Author": "Hayden",
+    "Author": "MrReeh",
     "Name": "Flash",
     "Punchline": "Automatically applies a Glamourer gear design when you use a specified emote.",
     "Description": "Watches for configured emotes and swaps your outfit via Glamourer while (and optionally only while) you're performing them, then reverts back to your normal gear afterward.",
