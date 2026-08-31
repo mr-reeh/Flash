@@ -12,9 +12,9 @@
     "DalamudApiLevel": 15,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://github.com/mr-reeh/flash/releases/download/v0.1.0/latest.zip",
-    "DownloadLinkTesting": "https://github.com/mr-reeh/flash/releases/download/v0.1.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/mr-reeh/flash/releases/download/v0.1.0/latest.zip",
+    "DownloadLinkInstall": "https://github.com/mr-reeh/flash/releases/download/v0.1.0.0/latest.zip",
+    "DownloadLinkTesting": "https://github.com/mr-reeh/flash/releases/download/v0.1.0.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/mr-reeh/flash/releases/download/v0.1.0.0/latest.zip",
     "LastUpdate": "1700000000"
   }
 ]
