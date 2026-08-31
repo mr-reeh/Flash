@@ -12,7 +12,6 @@ public class PluginUi
     public bool IsOpen;
 
     private string newEmoteSearch = string.Empty;
-    private string newDesignBase64 = string.Empty;
 
     public PluginUi(Plugin plugin)
     {
@@ -38,6 +37,17 @@ public class PluginUi
             this.plugin.Configuration.Save();
         }
 
+        ImGui.SameLine();
+        var debug = this.plugin.Configuration.DebugMode;
+        if (ImGui.Checkbox("Debug mode", ref debug))
+        {
+            this.plugin.Configuration.DebugMode = debug;
+            this.plugin.Configuration.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Echoes every emote chat line seen to chat, matched or not - use this to confirm detection is firing.");
+
         var glamourerReady = this.plugin.Glamourer.IsAvailable();
         ImGui.SameLine();
         ImGui.TextColored(
@@ -45,8 +55,8 @@ public class PluginUi
             glamourerReady ? "Glamourer: connected" : "Glamourer: not detected");
 
         ImGui.Separator();
-        ImGui.TextWrapped("Add a mapping: find the emote, paste a Glamourer design string " +
-                           "(Glamourer -> right-click a saved design -> Copy to Clipboard), then Add.");
+        ImGui.TextWrapped("Add a mapping: search for an emote and click Add. When it's used, " +
+                           "gear is stripped from head/body/hands/legs/feet/ears/neck/wrists/rings.");
 
         this.DrawAddRow();
 
@@ -88,25 +98,21 @@ public class PluginUi
             ImGui.TextColored(new Vector4(1f, 0.6f, 0.4f, 1f), "No exact match yet - keep typing.");
         }
 
-        ImGui.InputTextMultiline("##designBase64", ref this.newDesignBase64, 8192, new Vector2(-1, 60));
-
-        ImGui.BeginDisabled(matched == null || string.IsNullOrWhiteSpace(this.newDesignBase64));
+        ImGui.BeginDisabled(matched == null);
         if (ImGui.Button("Add mapping"))
         {
             this.plugin.Configuration.Entries.Add(new EmoteGearEntry
             {
                 EmoteId = matched!.Value.RowId,
                 EmoteName = matched.Value.Name.ExtractText(),
-                GlamourerDesignBase64 = this.newDesignBase64.Trim(),
                 RevertAfterEmote = true,
-                RevertDelaySeconds = 3.0f,
+                RevertDelaySeconds = 5.0f,
                 LocalPlayerOnly = true,
                 Enabled = true,
             });
             this.plugin.Configuration.Save();
 
             this.newEmoteSearch = string.Empty;
-            this.newDesignBase64 = string.Empty;
         }
 
         ImGui.EndDisabled();

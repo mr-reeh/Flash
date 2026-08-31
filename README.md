@@ -1,7 +1,8 @@
 # Flash
 
-Applies a Glamourer gear design automatically when a specified emote is used,
-and optionally reverts back to your real gear afterward.
+Automatically strips a character's gear (head/body/hands/legs/feet/ears/neck/
+wrists/rings) when a specified emote is used, then restores it after a
+configurable delay. No Glamourer design pasting required.
 
 ## Requirements
 
@@ -20,6 +21,10 @@ and optionally reverts back to your real gear afterward.
 2. See "How emote detection works now" below before relying on this for
    anything precision-critical - it's chat-text matching, not exact ID
    matching.
+3. **`GlamourerIpc.cs`'s `SetItem` call is the one thing in this file I
+   couldn't independently verify** (see the comment at the top of that file).
+   If it fails to compile, the error will name Glamourer.Api's real parameter
+   types directly - paste that back and it's a quick fix, not more guessing.
 
 ## Build
 
@@ -41,15 +46,23 @@ depending on SDK version).
 
 ## Using it
 
-1. Make sure Glamourer is running and you have at least one saved design.
-2. In Glamourer, right-click the design you want -> copy its base64 string
-   to your clipboard.
-3. In the Flash window, type part of an emote's name (e.g.
-   "Dance"), paste the design string into the box, and click "Add mapping".
-4. Optionally toggle "Revert after" and set a delay (in seconds) so your
-   gear reverts back automatically once the emote is done playing.
-5. Perform the emote in-game (via `/emote`, the emote wheel, or a macro) -
-   the gear should swap immediately.
+1. Make sure Glamourer is running.
+2. In the Flash window, type part of an emote's name (e.g. "Dance") and
+   click "Add mapping" once it matches.
+3. Optionally toggle "Revert after" and set a delay (in seconds) so gear
+   comes back automatically once the emote is done playing.
+4. Perform the emote in-game (via `/emote`, the emote wheel, or a macro) -
+   gear should strip immediately.
+
+## Debugging
+
+If it's not detecting emotes, run `/emotegear debug` (or check the "Debug
+mode" box in the config window). With it on, every `StandardEmote`/
+`CustomEmote` chat line Flash sees gets echoed straight to your chat window
+and `/xllog`, along with which step it passed or failed at (no configured
+match, wrong player, Glamourer unavailable, etc.) - no need to dig through
+logs blind. Toggle it off again once you've confirmed things are working, since
+it's noisy.
 
 ## Changelog / build fixes applied
 
@@ -91,6 +104,20 @@ depending on SDK version).
   errors without one). I set `Author` to "Hayden" based on your Windows
   username - change it, and the punchline/description/tags, to whatever you
   actually want shown in the plugin installer.
+- **Redesigned around gear-stripping instead of pasted designs.**
+  `GlamourerIpc.cs` no longer calls `ApplyDesign` with a user-supplied base64
+  string; it calls Glamourer's `SetItem` on each of the ten armor/accessory
+  slots to set them to "nothing". This also removed the design-textbox from
+  `PluginUi.cs` - adding a mapping is now just searching for an emote and
+  clicking Add. Switched from hand-rolled `ICallGateSubscriber` IPC calls to
+  the official `Glamourer.Api` NuGet package (added to `Flash.csproj`) for
+  this, since it gives compile-time-checked parameter types instead of
+  another round of guessed generic signatures - see the confidence note at
+  the top of `GlamourerIpc.cs` for which parts of that are solid vs. still
+  need a first-build sanity check.
+- **Added debug commands/logging.** `/emotegear debug` (or the "Debug mode"
+  checkbox) makes `Plugin.cs` echo every emote chat line it sees, and every
+  decision it makes about that line, straight to chat and `/xllog`.
 
 ## How emote detection works now (and its limitations)
 
@@ -129,7 +156,10 @@ kind of event `Plugin.cs` currently gets from `EmoteWatcher`.
   actual emote animation length, since animation duration isn't trivially
   exposed. You may want to tune `RevertDelaySeconds` per emote to match how
   long that specific emote plays.
-- `GlamourerApiEc` and `ApplyFlag` in `GlamourerIpc.cs` only include the
-  members this plugin uses. Check Glamourer's `IPC.md` in its repo if you
-  want to add more flags (e.g. also restoring customizations, not just
-  equipment).
+- `GlamourerIpc.StrippableSlots` covers head, body, hands, legs, feet, ears,
+  neck, wrists, and both rings - not weapons/offhand. Add
+  `ApiEquipSlot.MainHand`/`OffHand` to that list if you want those stripped
+  too.
+- `StripAllGear` sends item ID `0` for "nothing" on every slot. If Glamourer
+  actually needs a different sentinel value for an empty slot, some slots may
+  silently no-op instead of clearing - check in-game after a first test.

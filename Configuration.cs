@@ -17,14 +17,11 @@ public class EmoteGearEntry
     /// <summary>Display name cached for the config UI (not authoritative, just convenience).</summary>
     public string EmoteName { get; set; } = string.Empty;
 
-    /// <summary>Base64-encoded Glamourer design string, exported from the Glamourer GUI.</summary>
-    public string GlamourerDesignBase64 { get; set; } = string.Empty;
-
-    /// <summary>If true, the outfit is reverted back to the player's real gear after the emote finishes.</summary>
+    /// <summary>If true, gear is restored after the emote finishes (after RevertDelaySeconds).</summary>
     public bool RevertAfterEmote { get; set; } = true;
 
-    /// <summary>How long (seconds) to wait before reverting, if RevertAfterEmote is true.</summary>
-    public float RevertDelaySeconds { get; set; } = 3.0f;
+    /// <summary>How long (seconds) to stay stripped before restoring, if RevertAfterEmote is true.</summary>
+    public float RevertDelaySeconds { get; set; } = 5.0f;
 
     /// <summary>Only trigger for the local player, never for other actors performing the emote nearby.</summary>
     public bool LocalPlayerOnly { get; set; } = true;
@@ -38,11 +35,16 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 1;
 
-    /// <summary>All configured emote -> gear mappings.</summary>
+    /// <summary>All configured emote -> strip-gear mappings.</summary>
     public List<EmoteGearEntry> Entries { get; set; } = new();
 
     /// <summary>Master on/off switch for the whole plugin.</summary>
     public bool PluginEnabled { get; set; } = true;
+
+    /// <summary>When true, every StandardEmote/CustomEmote chat line seen is logged and
+    /// echoed to chat (whether it matched a configured entry or not), so you can confirm
+    /// detection is actually firing. Toggle via '/emotegear debug'.</summary>
+    public bool DebugMode { get; set; } = false;
 
     private IDalamudPluginInterface? pluginInterface;
 

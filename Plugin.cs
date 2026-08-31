@@ -49,17 +49,30 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(this.OnCommand)
         {
-            HelpMessage = "Open the emote gear config window. Use '/emotegear toggle' to enable/disable the plugin.",
+            HelpMessage = "Open the emote gear config window. '/emotegear toggle' enables/disables the plugin. " +
+                          "'/emotegear debug' toggles verbose logging of every emote chat line seen, to chat and /xllog.",
         });
     }
 
     private void OnCommand(string command, string args)
     {
-        if (string.Equals(args.Trim(), "toggle", StringComparison.OrdinalIgnoreCase))
+        var trimmed = args.Trim();
+
+        if (string.Equals(trimmed, "toggle", StringComparison.OrdinalIgnoreCase))
         {
             this.Configuration.PluginEnabled = !this.Configuration.PluginEnabled;
             this.Configuration.Save();
             Log.Information($"[Flash] Plugin {(this.Configuration.PluginEnabled ? "enabled" : "disabled")}.");
+            return;
+        }
+
+        if (string.Equals(trimmed, "debug", StringComparison.OrdinalIgnoreCase))
+        {
+            this.Configuration.DebugMode = !this.Configuration.DebugMode;
+            this.Configuration.Save();
+            ChatGui.Print($"[Flash] Debug mode {(this.Configuration.DebugMode ? "ON" : "OFF")} - " +
+                          "every emote chat line will be logged here" +
+                          (this.Configuration.DebugMode ? "." : " (now suppressed)."));
             return;
         }
 
@@ -74,12 +87,25 @@ public sealed class Plugin : IDalamudPlugin
     ///
     /// Matching is a case-insensitive substring check of the configured emote's name
     /// against the rendered chat text (see EmoteWatcher.cs for why - this doesn't get a
-    /// numeric EmoteId like the original native-hook design would have).
+    /// numeric EmoteId like a native hook would have). Enable '/emotegear debug' to see
+    /// every step of this logic echoed to chat.
     /// </summary>
     private void OnEmoteMessageSeen(string senderName, string messageText)
     {
+        if (this.Configuration.DebugMode)
+        {
+            var line = $"[Flash] chat seen: sender='{senderName}' text='{messageText}'";
+            Log.Information(line);
+            ChatGui.Print(line);
+        }
+
         if (!this.Configuration.PluginEnabled)
+        {
+            if (this.Configuration.DebugMode)
+                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/emotegear toggle' to enable).");
+
             return;
+        }
 
         EmoteGearEntry? match = null;
         foreach (var entry in this.Configuration.Entries)
@@ -94,7 +120,15 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         if (match == null)
+        {
+            if (this.Configuration.DebugMode)
+                ChatGui.Print("[Flash] ...no configured emote name matched this text.");
+
             return;
+        }
+
+        if (this.Configuration.DebugMode)
+            ChatGui.Print($"[Flash] ...matched entry '{match.EmoteName}' (id {match.EmoteId}).");
 
         var localPlayer = ObjectTable.LocalPlayer;
 
@@ -105,20 +139,38 @@ public sealed class Plugin : IDalamudPlugin
             || (localPlayer != null && string.Equals(senderName, localPlayer.Name.TextValue, StringComparison.Ordinal));
 
         if (match.LocalPlayerOnly && !isLocalPlayer)
-            return;
-
-        var target = isLocalPlayer ? localPlayer : this.FindCharacterByName(senderName);
-        if (target == null)
-            return;
-
-        if (!this.Glamourer.IsAvailable())
         {
-            Log.Warning("[Flash] Glamourer is not installed/loaded - cannot apply design.");
+            if (this.Configuration.DebugMode)
+                ChatGui.Print("[Flash] ...ignored, entry is local-player-only and this wasn't you.");
+
             return;
         }
 
-        var applied = this.Glamourer.ApplyDesign(match.GlamourerDesignBase64, target);
-        if (applied && match.RevertAfterEmote)
+        var target = isLocalPlayer ? localPlayer : this.FindCharacterByName(senderName);
+        if (target == null)
+        {
+            if (this.Configuration.DebugMode)
+                ChatGui.Print($"[Flash] ...couldn't resolve a character for sender '{senderName}'.");
+
+            return;
+        }
+
+        if (!this.Glamourer.IsAvailable())
+        {
+            Log.Warning("[Flash] Glamourer is not installed/loaded - cannot strip gear.");
+
+            if (this.Configuration.DebugMode)
+                ChatGui.Print("[Flash] ...Glamourer isn't available, aborting.");
+
+            return;
+        }
+
+        var stripped = this.Glamourer.StripAllGear(target);
+
+        if (this.Configuration.DebugMode)
+            ChatGui.Print($"[Flash] ...StripAllGear on '{target.Name.TextValue}' returned success={stripped}.");
+
+        if (stripped && match.RevertAfterEmote)
         {
             this.pendingReverts.Add(new PendingRevert(
                 target.GameObjectId,
