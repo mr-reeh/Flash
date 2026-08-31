@@ -1,0 +1,20 @@
+[
+  {
+    "Author": "Hayden",
+    "Name": "Flash",
+    "Punchline": "Automatically applies a Glamourer gear design when you use a specified emote.",
+    "Description": "Watches for configured emotes and swaps your outfit via Glamourer while (and optionally only while) you're performing them, then reverts back to your normal gear afterward.",
+    "InternalName": "Flash",
+    "AssemblyVersion": "0.1.0.0",
+    "TestingAssemblyVersion": null,
+    "RepoUrl": "https://github.com/mr-reeh/flash",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 15,
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "DownloadLinkInstall": "https://github.com/mr-reeh/flash/releases/download/v0.1.0/latest.zip",
+    "DownloadLinkTesting": "https://github.com/mr-reeh/flash/releases/download/v0.1.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/mr-reeh/flash/releases/download/v0.1.0/latest.zip",
+    "LastUpdate": "1700000000"
+  }
+]
