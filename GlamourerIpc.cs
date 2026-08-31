@@ -12,16 +12,14 @@ namespace Flash;
 /// Wraps the Glamourer.Api NuGet package (compile-time-checked IPC types) rather than
 /// hand-rolled ICallGateSubscriber calls with guessed generic signatures.
 ///
-/// CONFIDENCE NOTE: ApiVersion and RevertState below mirror Glamourer's IPC pattern that
-/// was directly confirmed against Glamourer's own source earlier in this project (the
-/// "Glamourer.ApiVersions" / "Glamourer.RevertState" IPC names), so those should be solid.
-/// SetItem (used for stripping gear) is constructed from the Glamourer.Api package's
-/// naming conventions and a source diff showing how Glamourer's own IpcProviders wire it
-/// up server-side, but the exact client-side Invoke(...) parameter order/types could not
-/// be independently confirmed from outside the package. If this doesn't compile, the
-/// compiler error will name the real expected parameter types directly from the
-/// Glamourer.Api assembly - paste that error back and it's a one-line fix, not more
-/// guessing.
+/// CONFIDENCE NOTE: ApiVersion and RevertState mirror Glamourer's IPC pattern that was
+/// directly confirmed against Glamourer's own source earlier in this project, so those
+/// should be solid. SetItem's real signature - int objectIndex, ApiEquipSlot slot, ulong
+/// itemId, IReadOnlyList&lt;StainId&gt; stains (a List&lt;byte&gt; client-side, not
+/// byte[] - see StripAllGear), uint key, ApplyFlag flags - was confirmed via two live
+/// runtime errors during testing: an empty stains array crashed Glamourer's own
+/// StainIds constructor, and a byte[] (vs. List&lt;byte&gt;) tripped Dalamud's IPC JSON
+/// round-trip because Newtonsoft serializes byte[] as base64 instead of a JSON array.
 /// </summary>
 public class GlamourerIpc
 {
@@ -74,10 +72,11 @@ public class GlamourerIpc
 
     /// <summary>
     /// Sets every slot in <see cref="StrippableSlots"/> to "nothing" on the given actor.
-    /// Returns false (and logs) on the first slot that fails, but still attempts the
-    /// remaining slots so a single bad slot doesn't leave the character half-dressed.
+    /// Attempts every slot even after a failure, so one bad slot doesn't leave the
+    /// character half-dressed. Pass <paramref name="onSlotResult"/> to get a line per
+    /// slot (e.g. to echo to chat in debug mode) instead of only the aggregate result.
     /// </summary>
-    public bool StripAllGear(ICharacter target, uint lockKey = 0)
+    public bool StripAllGear(ICharacter target, uint lockKey = 0, Action<string>? onSlotResult = null)
     {
         var allSucceeded = true;
 
@@ -85,22 +84,29 @@ public class GlamourerIpc
         {
             try
             {
-                // ItemId 0 represents an empty/unequipped slot. If this throws an
-                // IpcTypeMismatchError or similar at runtime instead of failing to
-                // compile, the parameter types below don't match Glamourer's actual
-                // SetItem signature - check Glamourer.Api's SetItem.cs (via "Go to
-                // Definition" in your IDE) for the real one and adjust this call.
-                var result = this.setItem.Invoke(target.ObjectIndex, slot, 0, Array.Empty<byte>(), lockKey);
+                // ItemId 0 represents an empty/unequipped slot. Stains must be a
+                // List<byte>, not a byte[] - Dalamud's cross-plugin IPC round-trips
+                // mismatched argument types through JSON, and Newtonsoft special-cases
+                // byte[] as a base64 string (confirmed via a live IpcTypeMismatchError),
+                // which then fails to deserialize into IReadOnlyList<byte>. List<byte>
+                // serializes as a normal JSON array and deserializes correctly.
+                var result = this.setItem.Invoke(target.ObjectIndex, slot, 0, new List<byte> { 0, 0 }, lockKey);
 
                 if (result != GlamourerApiEc.Success && result != GlamourerApiEc.NothingDone)
                 {
                     this.log.Warning($"[Flash] Glamourer.SetItem({slot}) returned {result}");
+                    onSlotResult?.Invoke($"{slot}: FAILED ({result})");
                     allSucceeded = false;
+                }
+                else
+                {
+                    onSlotResult?.Invoke($"{slot}: ok ({result})");
                 }
             }
             catch (Exception ex)
             {
                 this.log.Error(ex, $"[Flash] Failed to call Glamourer.SetItem for slot {slot}");
+                onSlotResult?.Invoke($"{slot}: EXCEPTION ({ex.GetType().Name}: {ex.Message})");
                 allSucceeded = false;
             }
         }
