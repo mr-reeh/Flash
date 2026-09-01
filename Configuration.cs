@@ -85,7 +85,7 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>When true, every emote seen (native hook or chat) is logged and echoed to
     /// chat (whether it matched a configured entry or not), so you can confirm detection
-    /// is actually firing. Toggle via '/emotegear debug'.</summary>
+    /// is actually firing. Toggle via '/flash debug'.</summary>
     public bool DebugMode { get; set; } = false;
 
     private IDalamudPluginInterface? pluginInterface;

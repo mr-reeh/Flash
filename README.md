@@ -36,7 +36,7 @@ dotnet build -c Debug
 2. Under "Dev Plugin Locations", add the full path to the built `.dll` (or
    its containing folder).
 3. Run `/xlplugins`, find Flash under Dev Tools, and load it.
-4. Run `/emotegear` to open the config window ("Flash Config").
+4. Run `/flash` to open the config window ("Flash Config").
 
 ## Using it
 
@@ -152,14 +152,14 @@ the same safe-lookup pattern either way.
 
 ## Debugging
 
-Run `/emotegear debug` (or check "Debug mode" in the config window). With it
+Run `/flash debug` (or check "Debug mode" in the config window). With it
 on, every emote Flash sees - native or chat-based - gets echoed to chat and
 `/xllog`, along with which step it passed or failed at (no match, Glamourer
 unavailable, per-slot results, etc.). Toggle it off once confirmed working,
 since it's noisy.
 
 For finding the exact ID of an emote or action to enter in the manual
-override field, use **`/emotegear log`** (or the "Debug Log" button in Flash
+override field, use **`/flash log`** (or the "Debug Log" button in Flash
 Config) instead - it opens a dedicated, persistent window listing every
 locally-detected emote/action with its resolved name, real numeric ID, and
 whether it matched a configured entry, plus a Copy button per row. Unlike

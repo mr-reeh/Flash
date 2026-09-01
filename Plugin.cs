@@ -60,7 +60,7 @@ public sealed class Plugin : IDalamudPlugin
     // see RevertCharacterGear. Keyed by GameObjectId, cleared once restored/consumed.
     private readonly Dictionary<ulong, string> savedGlamourerStates = new();
 
-    private const string CommandName = "/emotegear";
+    private const string CommandName = "/flash";
 
     private readonly record struct PendingStrip(ulong GameObjectId, EmoteGearEntry Entry, DateTime StripAt);
     private readonly record struct PendingForcedRevert(ulong GameObjectId, DateTime RevertAt);
@@ -93,9 +93,9 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(this.OnCommand)
         {
-            HelpMessage = "Open the emote config window. '/emotegear toggle' enables/disables the plugin. " +
-                          "'/emotegear debug' toggles verbose logging of every emote detected, to chat and /xllog. " +
-                          "'/emotegear log' opens the Flash Debug Log for finding emote/action IDs.",
+            HelpMessage = "Open the emote config window. '/flash toggle' enables/disables the plugin. " +
+                          "'/flash debug' toggles verbose logging of every emote detected, to chat and /xllog. " +
+                          "'/flash log' opens the Flash Debug Log for finding emote/action IDs.",
         });
     }
 
@@ -150,7 +150,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!this.Configuration.PluginEnabled)
         {
             if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/emotegear toggle' to enable).");
+                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/flash toggle' to enable).");
 
             return;
         }
@@ -187,7 +187,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!this.Configuration.PluginEnabled)
         {
             if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/emotegear toggle' to enable).");
+                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/flash toggle' to enable).");
 
             return;
         }
@@ -227,7 +227,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!this.Configuration.PluginEnabled)
         {
             if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/emotegear toggle' to enable).");
+                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/flash toggle' to enable).");
 
             return;
         }
