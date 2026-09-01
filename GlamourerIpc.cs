@@ -248,7 +248,18 @@ public class GlamourerIpc
     {
         try
         {
-            var result = this.applyState.Invoke(state, target.ObjectIndex, lockKey, ApplyFlag.Once);
+            // Equipment | Customization must be OR'd in explicitly - Glamourer's own
+            // Reapply/Revert logic switches on (flags & (Equipment | Customization)) to
+            // decide what to actually touch. Passing Once alone (as the first version of
+            // this did) matches neither case, so it reports success while silently doing
+            // nothing - confirmed via a live test where the character stayed stripped
+            // despite RestoreState returning true.
+            var result = this.applyState.Invoke(
+                state,
+                target.ObjectIndex,
+                lockKey,
+                ApplyFlag.Once | ApplyFlag.Equipment | ApplyFlag.Customization);
+
             if (result != GlamourerApiEc.Success && result != GlamourerApiEc.NothingDone)
             {
                 this.log.Warning($"[Flash] Glamourer.ApplyState returned {result}");
