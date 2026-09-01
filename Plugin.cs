@@ -4,7 +4,6 @@ using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using LuminaAction = Lumina.Excel.Sheets.Action;
 using LuminaEmote = Lumina.Excel.Sheets.Emote;
 
 namespace Flash;
@@ -27,9 +26,9 @@ public sealed class Plugin : IDalamudPlugin
     public PluginUi Ui { get; }
     public DebugLogUi DebugLogWindow { get; }
 
-    /// <summary>Rolling log of every locally-detected emote/action with its exact ID and
-    /// resolved name, for finding IDs to enter in the manual override field. Populated
-    /// unconditionally (not gated by DebugMode) since this is a separate, dedicated tool.</summary>
+    /// <summary>Rolling log of every locally-detected emote with its exact ID and resolved
+    /// name, for finding IDs to enter in the manual override field. Always recording -
+    /// this is a standalone tool, not tied to any toggle.</summary>
     public List<DebugLogEntry> DebugLog { get; } = new();
 
     public const int MaxDebugLogEntries = 200;
@@ -38,18 +37,13 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly EmoteWatcher emoteWatcher;
     private readonly EmoteHook emoteHook;
-    private readonly ActionHook actionHook;
 
     // Emotes waiting out their trigger delay before gear gets stripped/swapped.
     private readonly List<PendingStrip> pendingStrips = new();
 
-    // Characters currently wearing Flash-altered gear, mapped to which trigger type
-    // caused it. Emote-triggered gear reverts via animation-end polling (see
-    // ProcessAlteredCharacters); Action-triggered gear has no animation state to poll,
-    // so it relies entirely on ProcessForcedReverts (Duration) instead - see
-    // ProcessPendingStrips, which forces UseDuration on for Action entries regardless of
-    // the checkbox, since otherwise it would never revert.
-    private readonly Dictionary<ulong, TriggerType> alteredCharacters = new();
+    // Characters currently wearing Flash-altered gear, so a later unmatched emote or the
+    // animation-end poll knows to revert them.
+    private readonly HashSet<ulong> alteredCharacters = new();
 
     // Scheduled forced reverts for entries with UseDuration=true - an early cutoff on
     // top of the normal animation-end detection, not a replacement for it.
@@ -79,9 +73,6 @@ public sealed class Plugin : IDalamudPlugin
         this.emoteHook = new EmoteHook(GameInteropProvider, Log);
         this.emoteHook.LocalPlayerEmoteExecuted += this.OnLocalPlayerEmoteExecuted;
 
-        this.actionHook = new ActionHook(GameInteropProvider, Log);
-        this.actionHook.LocalPlayerActionUsed += this.OnLocalPlayerActionUsed;
-
         this.Ui = new PluginUi(this);
         PluginInterface.UiBuilder.Draw += this.Ui.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += () => this.Ui.IsOpen = true;
@@ -93,9 +84,8 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(this.OnCommand)
         {
-            HelpMessage = "Open the emote config window. '/flash toggle' enables/disables the plugin. " +
-                          "'/flash debug' toggles verbose logging of every emote detected, to chat and /xllog. " +
-                          "'/flash log' opens the Flash Debug Log for finding emote/action IDs.",
+            HelpMessage = "Open the Flash config window. '/flash toggle' enables/disables the plugin. " +
+                          "'/flash log' opens the Flash Debug Log for finding emote IDs.",
         });
     }
 
@@ -108,16 +98,6 @@ public sealed class Plugin : IDalamudPlugin
             this.Configuration.PluginEnabled = !this.Configuration.PluginEnabled;
             this.Configuration.Save();
             Log.Information($"[Flash] Plugin {(this.Configuration.PluginEnabled ? "enabled" : "disabled")}.");
-            return;
-        }
-
-        if (string.Equals(trimmed, "debug", StringComparison.OrdinalIgnoreCase))
-        {
-            this.Configuration.DebugMode = !this.Configuration.DebugMode;
-            this.Configuration.Save();
-            ChatGui.Print($"[Flash] Debug mode {(this.Configuration.DebugMode ? "ON" : "OFF")} - " +
-                          "every emote detected will be logged here" +
-                          (this.Configuration.DebugMode ? "." : " (now suppressed)."));
             return;
         }
 
@@ -140,66 +120,12 @@ public sealed class Plugin : IDalamudPlugin
         var match = this.FindMatchById(emoteId);
         this.AddDebugLogEntry("Emote", emoteId, ResolveEmoteName(emoteId), match != null);
 
-        if (this.Configuration.DebugMode)
-        {
-            var line = $"[Flash] native: local player used emote id {emoteId}";
-            Log.Information(line);
-            ChatGui.Print(line);
-        }
-
         if (!this.Configuration.PluginEnabled)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/flash toggle' to enable).");
-
             return;
-        }
 
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...local player object unavailable, skipping.");
-
             return;
-        }
-
-        this.HandleEmoteForCharacter(match, localPlayer);
-    }
-
-    /// <summary>
-    /// Called from ActionHook whenever the local player uses any action - native hook,
-    /// exact numeric ActionId, fires the instant the game accepts the action (see the
-    /// caveat on ActionHook's UseAction hook about queued actions).
-    /// </summary>
-    private void OnLocalPlayerActionUsed(uint actionId)
-    {
-        var match = this.FindMatchByActionId(actionId);
-        this.AddDebugLogEntry("Action", actionId, ResolveActionName(actionId), match != null);
-
-        if (this.Configuration.DebugMode)
-        {
-            var line = $"[Flash] native: local player used action id {actionId}";
-            Log.Information(line);
-            ChatGui.Print(line);
-        }
-
-        if (!this.Configuration.PluginEnabled)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/flash toggle' to enable).");
-
-            return;
-        }
-
-        var localPlayer = ObjectTable.LocalPlayer;
-        if (localPlayer == null)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...local player object unavailable, skipping.");
-
-            return;
-        }
 
         this.HandleEmoteForCharacter(match, localPlayer);
     }
@@ -217,20 +143,8 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     private void OnEmoteMessageSeen(string senderName, string messageText)
     {
-        if (this.Configuration.DebugMode)
-        {
-            var line = $"[Flash] chat seen: sender='{senderName}' text='{messageText}'";
-            Log.Information(line);
-            ChatGui.Print(line);
-        }
-
         if (!this.Configuration.PluginEnabled)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/flash toggle' to enable).");
-
             return;
-        }
 
         var localPlayer = ObjectTable.LocalPlayer;
 
@@ -241,21 +155,11 @@ public sealed class Plugin : IDalamudPlugin
             || (localPlayer != null && string.Equals(senderName, localPlayer.Name.TextValue, StringComparison.Ordinal));
 
         if (isLocalPlayer)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...ignored, this was the local player (handled by the native hook instead).");
-
             return;
-        }
 
         var target = this.FindCharacterByName(senderName);
         if (target == null)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print($"[Flash] ...couldn't resolve a character for sender '{senderName}'.");
-
             return;
-        }
 
         var match = this.FindMatchByText(messageText);
         this.HandleEmoteForCharacter(match, target);
@@ -264,14 +168,6 @@ public sealed class Plugin : IDalamudPlugin
     private static string ResolveEmoteName(uint id)
     {
         var sheet = DataManager.GetExcelSheet<LuminaEmote>();
-        var row = sheet?.GetRowOrDefault(id);
-        var name = row?.Name.ExtractText();
-        return string.IsNullOrEmpty(name) ? "(unknown)" : name;
-    }
-
-    private static string ResolveActionName(uint id)
-    {
-        var sheet = DataManager.GetExcelSheet<LuminaAction>();
         var row = sheet?.GetRowOrDefault(id);
         var name = row?.Name.ExtractText();
         return string.IsNullOrEmpty(name) ? "(unknown)" : name;
@@ -289,18 +185,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         foreach (var entry in this.Configuration.Entries)
         {
-            if (entry.Enabled && entry.TriggerType == TriggerType.Emote && entry.EmoteId == emoteId)
-                return entry;
-        }
-
-        return null;
-    }
-
-    private EmoteGearEntry? FindMatchByActionId(uint actionId)
-    {
-        foreach (var entry in this.Configuration.Entries)
-        {
-            if (entry.Enabled && entry.TriggerType == TriggerType.Action && entry.ActionId == actionId)
+            if (entry.Enabled && entry.EmoteId == emoteId)
                 return entry;
         }
 
@@ -338,12 +223,6 @@ public sealed class Plugin : IDalamudPlugin
 
         if (match != null)
         {
-            if (this.Configuration.DebugMode)
-            {
-                ChatGui.Print($"[Flash] ...matched entry '{match.EmoteName}' (id {match.EmoteId}) - " +
-                              $"scheduling strip on '{target.Name.TextValue}' in {match.TriggerDelaySeconds:0.0}s.");
-            }
-
             this.pendingStrips.Add(new PendingStrip(
                 target.GameObjectId,
                 match,
@@ -352,18 +231,8 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        if (this.Configuration.DebugMode)
-            ChatGui.Print("[Flash] ...no configured emote matched.");
-
         if (this.alteredCharacters.Remove(target.GameObjectId))
-        {
-            this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == target.GameObjectId);
-
-            if (this.Configuration.DebugMode)
-                ChatGui.Print($"[Flash] ...animation changed, reverting '{target.Name.TextValue}'.");
-
             this.RevertCharacterGear(target, target.GameObjectId);
-        }
     }
 
     /// <summary>
@@ -376,16 +245,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (this.savedGlamourerStates.Remove(gameObjectId, out var savedState))
         {
-            var restored = this.Glamourer.RestoreState(character, savedState);
-
-            if (this.Configuration.DebugMode)
-                ChatGui.Print($"[Flash] ...restored prior Glamourer state on '{character.Name.TextValue}' (success={restored}).");
-
-            if (restored)
+            if (this.Glamourer.RestoreState(character, savedState))
                 return;
-
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...falling back to a plain revert (real equipped gear, not the prior Glamourer state).");
         }
 
         this.Glamourer.Revert(character);
@@ -414,13 +275,10 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     /// <summary>
-    /// Polls every Emote-triggered character with Flash-altered gear and reverts them
-    /// the moment their animation actually finishes (IsEmoting/IsInEmoteLoop both false)
-    /// - covers both a single emote playing out naturally and a looping emote being
-    /// cancelled by movement or re-triggering, without needing a timer. Action-triggered
-    /// characters are skipped here entirely (see the field comment on
-    /// alteredCharacters) - they have no animation state to poll and rely on
-    /// ProcessForcedReverts instead.
+    /// Polls every character with Flash-altered gear and reverts them the moment their
+    /// animation actually finishes (IsEmoting/IsInEmoteLoop both false) - covers both a
+    /// single emote playing out naturally and a looping emote being cancelled by
+    /// movement or re-triggering, without needing a timer.
     /// </summary>
     private void ProcessAlteredCharacters()
     {
@@ -428,11 +286,8 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         // Snapshot - Revert below can mutate alteredCharacters mid-iteration.
-        foreach (var (gameObjectId, triggerType) in new Dictionary<ulong, TriggerType>(this.alteredCharacters))
+        foreach (var gameObjectId in new List<ulong>(this.alteredCharacters))
         {
-            if (triggerType != TriggerType.Emote)
-                continue;
-
             ICharacter? character = null;
             foreach (var obj in ObjectTable)
             {
@@ -455,9 +310,6 @@ public sealed class Plugin : IDalamudPlugin
 
             if (!NativeCharacterHelper.IsEmoting(character.Address))
             {
-                if (this.Configuration.DebugMode)
-                    ChatGui.Print($"[Flash] ...animation finished on '{character.Name.TextValue}', reverting.");
-
                 this.alteredCharacters.Remove(gameObjectId);
                 this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == gameObjectId);
                 this.RevertCharacterGear(character, gameObjectId);
@@ -493,10 +345,6 @@ public sealed class Plugin : IDalamudPlugin
                 if (obj is ICharacter character && character.GameObjectId == pending.GameObjectId)
                 {
                     foundCharacter = true;
-
-                    if (this.Configuration.DebugMode)
-                        ChatGui.Print($"[Flash] ...duration elapsed, force-reverting '{character.Name.TextValue}'.");
-
                     this.RevertCharacterGear(character, pending.GameObjectId);
                     break;
                 }
@@ -532,20 +380,11 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             if (target == null)
-            {
-                if (this.Configuration.DebugMode)
-                    ChatGui.Print("[Flash] ...couldn't find the character at strip time, skipping.");
-
                 continue;
-            }
 
             if (!this.Glamourer.IsAvailable())
             {
                 Log.Warning("[Flash] Glamourer is not installed/loaded - cannot strip gear.");
-
-                if (this.Configuration.DebugMode)
-                    ChatGui.Print("[Flash] ...Glamourer isn't available, aborting.");
-
                 continue;
             }
 
@@ -555,38 +394,15 @@ public sealed class Plugin : IDalamudPlugin
             // gear/body - see RevertCharacterGear.
             var savedState = this.Glamourer.CaptureState(target);
             if (savedState != null)
-            {
                 this.savedGlamourerStates[pending.GameObjectId] = savedState;
-            }
-            else if (this.Configuration.DebugMode)
-            {
-                ChatGui.Print("[Flash] ...couldn't capture the prior Glamourer state - will fall back to a " +
-                              "plain revert (real equipped gear) when this reverts.");
-            }
 
-            var stripped = this.Glamourer.StripAllGear(
-                target,
-                this.Configuration.StripMode,
-                onSlotResult: this.Configuration.DebugMode
-                    ? (line => ChatGui.Print($"[Flash]   {line}"))
-                    : null);
-
-            if (this.Configuration.DebugMode)
-                ChatGui.Print($"[Flash] ...StripAllGear on '{target.Name.TextValue}' " +
-                              $"({this.Configuration.StripMode}) returned success={stripped}.");
+            var stripped = this.Glamourer.StripAllGear(target, this.Configuration.StripMode);
 
             if (stripped)
             {
-                this.alteredCharacters[pending.GameObjectId] = pending.Entry.TriggerType;
+                this.alteredCharacters.Add(pending.GameObjectId);
 
-                // Action entries have no animation state to poll (see
-                // ProcessAlteredCharacters), so Duration is their only way back to
-                // normal - force it on regardless of the checkbox, using the configured
-                // DurationSeconds (or the field's own default if the user never touched
-                // it), so an Action mapping can never leave gear stuck permanently.
-                var useDuration = pending.Entry.UseDuration || pending.Entry.TriggerType == TriggerType.Action;
-
-                if (useDuration)
+                if (pending.Entry.UseDuration)
                 {
                     this.pendingForcedReverts.Add(new PendingForcedRevert(
                         pending.GameObjectId,
@@ -608,8 +424,5 @@ public sealed class Plugin : IDalamudPlugin
 
         this.emoteHook.LocalPlayerEmoteExecuted -= this.OnLocalPlayerEmoteExecuted;
         this.emoteHook.Dispose();
-
-        this.actionHook.LocalPlayerActionUsed -= this.OnLocalPlayerActionUsed;
-        this.actionHook.Dispose();
     }
 }

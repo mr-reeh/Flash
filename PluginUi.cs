@@ -2,7 +2,6 @@ using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Lumina.Excel.Sheets;
-using LuminaAction = Lumina.Excel.Sheets.Action;
 
 namespace Flash;
 
@@ -12,10 +11,7 @@ public class PluginUi
 
     public bool IsOpen;
 
-    private TriggerType newTriggerType = TriggerType.Emote;
     private string newEmoteSearch = string.Empty;
-    private string newActionSearch = string.Empty;
-    private int newActionIdOverride;
 
     public PluginUi(Plugin plugin)
     {
@@ -42,22 +38,11 @@ public class PluginUi
         }
 
         ImGui.SameLine();
-        var debug = this.plugin.Configuration.DebugMode;
-        if (ImGui.Checkbox("Debug mode", ref debug))
-        {
-            this.plugin.Configuration.DebugMode = debug;
-            this.plugin.Configuration.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Echoes every emote detected to chat, matched or not - use this to confirm detection is firing.");
-
-        ImGui.SameLine();
         if (ImGui.Button("Debug Log"))
             this.plugin.DebugLogWindow.IsOpen = true;
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Opens a log of every emote/action you've used with its exact ID - use it to find IDs for the manual override field.");
+            ImGui.SetTooltip("Opens a log of every emote you've used with its exact ID and name - use it to confirm detection is working and see exactly which emote matched.");
 
         var glamourerReady = this.plugin.Glamourer.IsAvailable();
         ImGui.SameLine();
@@ -88,10 +73,9 @@ public class PluginUi
         }
 
         ImGui.Separator();
-        ImGui.TextWrapped("Add a mapping: pick Emote or Action, search by name, and click Add. When " +
-                           "triggered, gear in head/body/hands/legs/feet/ears/neck/wrists/rings is replaced " +
-                           "per the mode above. Emote mappings revert once the animation finishes (or sooner " +
-                           "with Duration); Action mappings always use Duration.");
+        ImGui.TextWrapped("Add a mapping: search for an emote and click Add. When it's used, gear in " +
+                           "head/body/hands/legs/feet/ears/neck/wrists/rings is replaced per the mode above. " +
+                           "It reverts once the animation finishes, or sooner if Use Duration is checked below.");
 
         this.DrawAddRow();
 
@@ -102,25 +86,6 @@ public class PluginUi
     }
 
     private void DrawAddRow()
-    {
-        ImGui.TextUnformatted("New trigger:");
-        ImGui.SameLine();
-
-        if (ImGui.RadioButton("Emote##triggerType", this.newTriggerType == TriggerType.Emote))
-            this.newTriggerType = TriggerType.Emote;
-
-        ImGui.SameLine();
-
-        if (ImGui.RadioButton("Action##triggerType", this.newTriggerType == TriggerType.Action))
-            this.newTriggerType = TriggerType.Action;
-
-        if (this.newTriggerType == TriggerType.Emote)
-            this.DrawAddEmoteRow();
-        else
-            this.DrawAddActionRow();
-    }
-
-    private void DrawAddEmoteRow()
     {
         ImGui.InputTextWithHint("##emoteSearch", "Emote name (e.g. Dance, Salute)", ref this.newEmoteSearch, 64);
 
@@ -157,7 +122,6 @@ public class PluginUi
         {
             this.plugin.Configuration.Entries.Add(new EmoteGearEntry
             {
-                TriggerType = TriggerType.Emote,
                 EmoteId = matched!.Value.RowId,
                 EmoteName = matched.Value.Name.ExtractText(),
                 TriggerDelaySeconds = 0f,
@@ -167,91 +131,6 @@ public class PluginUi
             this.plugin.Configuration.Save();
 
             this.newEmoteSearch = string.Empty;
-        }
-
-        ImGui.EndDisabled();
-    }
-
-    private void DrawAddActionRow()
-    {
-        ImGui.InputTextWithHint("##actionSearch", "Action name (e.g. Provoke)", ref this.newActionSearch, 64);
-
-        var sheet = Plugin.DataManager.GetExcelSheet<LuminaAction>();
-        LuminaAction? matched = null;
-
-        if (!string.IsNullOrWhiteSpace(this.newActionSearch) && sheet != null)
-        {
-            foreach (var row in sheet)
-            {
-                var name = row.Name.ExtractText();
-                if (string.IsNullOrEmpty(name))
-                    continue;
-
-                if (name.Contains(this.newActionSearch, StringComparison.OrdinalIgnoreCase))
-                {
-                    matched = row;
-                    break;
-                }
-            }
-        }
-
-        if (matched != null)
-        {
-            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), $"Matched: {matched.Value.Name.ExtractText()} (Id {matched.Value.RowId})");
-        }
-        else if (!string.IsNullOrWhiteSpace(this.newActionSearch))
-        {
-            ImGui.TextColored(new Vector4(1f, 0.6f, 0.4f, 1f), "No exact match yet - keep typing.");
-        }
-
-        ImGui.TextWrapped("The Action sheet has duplicate/legacy rows sharing the same name, so a text " +
-                           "search can grab the wrong one. If a mapping doesn't fire, turn on Debug mode, " +
-                           "use the action, and check chat/xllog for the real 'used action id' number - " +
-                           "then enter it directly below instead.");
-
-        ImGui.SetNextItemWidth(120);
-        ImGui.InputInt("Action ID override (optional)", ref this.newActionIdOverride);
-
-        if (this.newActionIdOverride > 0 && sheet != null)
-        {
-            var overrideRow = sheet.GetRowOrDefault((uint)this.newActionIdOverride);
-            var overrideName = overrideRow?.Name.ExtractText() ?? "(unknown - not in Action sheet, will still be saved)";
-            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), $"Will use: {overrideName} (Id {this.newActionIdOverride})");
-        }
-
-        var hasOverride = this.newActionIdOverride > 0;
-        ImGui.BeginDisabled(matched == null && !hasOverride);
-        if (ImGui.Button("Add mapping"))
-        {
-            uint actionId;
-            string actionName;
-
-            if (hasOverride)
-            {
-                actionId = (uint)this.newActionIdOverride;
-                actionName = sheet?.GetRowOrDefault(actionId)?.Name.ExtractText() ?? $"Action {actionId}";
-            }
-            else
-            {
-                actionId = matched!.Value.RowId;
-                actionName = matched.Value.Name.ExtractText();
-            }
-
-            this.plugin.Configuration.Entries.Add(new EmoteGearEntry
-            {
-                TriggerType = TriggerType.Action,
-                ActionId = actionId,
-                ActionName = actionName,
-                TriggerDelaySeconds = 0f,
-                UseDuration = true,
-                DurationSeconds = 2.0f,
-                LocalPlayerOnly = true,
-                Enabled = true,
-            });
-            this.plugin.Configuration.Save();
-
-            this.newActionSearch = string.Empty;
-            this.newActionIdOverride = 0;
         }
 
         ImGui.EndDisabled();
@@ -316,10 +195,7 @@ public class PluginUi
             }
 
             ImGui.TableNextColumn();
-            var triggerLabel = entry.TriggerType == TriggerType.Emote
-                ? $"[Emote] {entry.EmoteName} ({entry.EmoteId})"
-                : $"[Action] {entry.ActionName} ({entry.ActionId})";
-            ImGui.TextUnformatted(triggerLabel);
+            ImGui.TextUnformatted($"{entry.EmoteName} ({entry.EmoteId})");
 
             ImGui.TableNextColumn();
             var triggerDelay = entry.TriggerDelaySeconds;
@@ -331,26 +207,21 @@ public class PluginUi
             }
 
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("How long to wait after the trigger fires before gear changes.");
+                ImGui.SetTooltip("How long to wait after the emote starts before gear changes.");
 
             ImGui.TableNextColumn();
             var useDuration = entry.UseDuration;
-            ImGui.BeginDisabled(entry.TriggerType == TriggerType.Action);
             if (ImGui.Checkbox("##useDuration", ref useDuration))
             {
                 entry.UseDuration = useDuration;
                 this.plugin.Configuration.Save();
             }
 
-            if (entry.TriggerType == TriggerType.Action && ImGui.IsItemHovered())
-                ImGui.SetTooltip("Action triggers always use Duration - there's no animation to detect the end of.");
-            else if (ImGui.IsItemHovered())
+            if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("If off, gear reverts only when the animation actually finishes. If on, it also force-reverts after Duration, whichever comes first.");
 
-            ImGui.EndDisabled();
-
             ImGui.TableNextColumn();
-            ImGui.BeginDisabled(!entry.UseDuration && entry.TriggerType != TriggerType.Action);
+            ImGui.BeginDisabled(!entry.UseDuration);
             var duration = entry.DurationSeconds;
             ImGui.SetNextItemWidth(80);
             if (ImGui.DragFloat("##duration", ref duration, 0.1f, 0.0f, 300.0f, "%.1f"))

@@ -2,9 +2,9 @@
 
 Changes a character's gear (head/body/hands/legs/feet/ears/neck/wrists/rings)
 to either nothing ("Smallclothes") or the Emperor's New Set when a specified
-emote or combat action is used. Gear reverts once the animation finishes
-(emotes) or after a set duration (actions, or emotes with Duration enabled).
-No Glamourer design pasting required.
+emote is used. Gear reverts once the animation finishes, or after a set
+Duration if that's enabled on the mapping. No Glamourer design pasting
+required.
 
 ## Requirements
 
@@ -47,13 +47,17 @@ dotnet build -c Debug
    it matches.
 4. Optionally set a **Delay (s)** per entry - how long to wait after the
    emote starts before gear changes.
-5. Drag the `::` handle on the left of a row to reorder the list (matching
-   only stops at the first enabled entry that fires, so order can matter if
-   you ever have overlapping triggers).
-5. Perform the emote in-game - gear changes per the mode above, and stays
+5. Optionally check **Use Duration** and set **Duration (s)** to force gear
+   back to normal after a fixed time even if the animation is still playing
+   (e.g. to cut a looping emote's effect short deliberately). Off by
+   default - gear only reverts once the animation actually finishes.
+6. Use the `^`/`v` buttons on the left of a row to reorder the list
+   (matching stops at the first enabled entry that fires, so order can
+   matter if you ever have overlapping mappings).
+7. Perform the emote in-game - gear changes per the mode above, and stays
    that way until you do something not configured (a different, unmapped
-   emote, or - for looping emotes - simply nothing, since they never
-   re-trigger the native hook while looping).
+   emote, Duration elapsing, or - for looping emotes - simply nothing, since
+   they never re-trigger the native hook while looping).
 
 ## How emote detection works
 
@@ -79,60 +83,37 @@ Two complementary mechanisms decide when gear goes back to normal:
 
 1. **Animation-end polling** (`NativeCharacterHelper.cs`, checked every frame
    in `Plugin.cs`): reads `Character.EmoteController.IsEmoting()` /
-   `IsInEmoteLoop()` directly. The instant both go false for an
-   Emote-triggered altered character, gear reverts. This only applies to
-   Emote entries - Actions have no animation state to poll.
+   `IsInEmoteLoop()` directly. The instant both go false for an altered
+   character, gear reverts - covers a single emote playing out naturally and
+   a looping emote being cancelled by movement or re-triggering.
 2. **Duration** (optional per-entry, `UseDuration` + `DurationSeconds`):
    force-reverts gear after a fixed time even if the animation is still
-   playing, letting you cut a change short deliberately. **Action entries
-   always use this regardless of the checkbox** - it's their only way back
-   to normal gear, since there's no emote animation to detect the end of.
-3. **Immediate revert on an unmatched new emote**: if a *different* emote is
-   detected for an already-altered character and it isn't configured, gear
-   reverts right away rather than waiting for polling to catch up.
+   playing, letting a change be cut short deliberately.
 
-`Plugin.cs` tracks which characters currently have Flash-altered gear (and
-which trigger type caused it) via `alteredCharacters`.
+`Plugin.cs` tracks which characters currently have Flash-altered gear via
+`alteredCharacters`. A new *unmatched* emote for an already-altered character
+also triggers an immediate revert, rather than waiting for polling to catch
+up.
 
-**Reverting preserves any prior Glamourer state.** `RevertState` on its own
-discards any active Glamourer override entirely and reverts to the
-character's actual equipped gear/body - so if you'd used Glamourer to, say,
-swap genders, Flash's revert would silently undo that too. Instead,
-`GlamourerIpc.CaptureState` snapshots the character's full current Glamourer
-state right before stripping (`ProcessPendingStrips`), and all three revert
-paths above call `RevertCharacterGear`, which restores that exact snapshot
-via `GlamourerIpc.RestoreState` instead of calling `Revert`. If capturing or
-restoring the snapshot fails for any reason, it falls back to the old
-`Revert` (real equipped gear) behavior rather than leaving gear stuck.
+**Reverting preserves any prior Glamourer state, when possible.**
+`RevertState` on its own discards any active Glamourer override entirely and
+reverts to the character's actual equipped gear/body - so if you'd used
+Glamourer to, say, swap genders, a plain revert would silently undo that
+too. Instead, `GlamourerIpc.CaptureState` snapshots the character's full
+current Glamourer state right before stripping, and `RevertCharacterGear`
+restores that exact snapshot via `GlamourerIpc.RestoreState` instead of
+calling `Revert`. If capturing or restoring the snapshot fails, it falls
+back to the old `Revert` (real equipped gear) behavior rather than leaving
+gear stuck.
 
-CaptureState/RestoreState use Glamourer's `GetStateBase64`/`ApplyState` IPC,
-confirmed to exist but not independently verified parameter-by-parameter the
-way `SetItem` was (see the confidence note in `GlamourerIpc.cs`) - if a
-runtime error shows up here, it's the same kind of one-round fix `SetItem`
-needed.
-
-## Combat action triggers
-
-`ActionHook.cs` hooks `FFXIVClientStructs.FFXIV.Client.Game.ActionManager.UseAction`
-directly - the central entry point for the local player using any action
-(weaponskill, spell, item, mount, general action, etc.), confirmed against
-the user's installed `FFXIVClientStructs.dll`. It fires whenever the game
-accepts an action (the underlying call returns `true`).
-
-**Caveat** (from FFXIVClientStructs' own doc comment on `UseAction`): near a
-cooldown/animation-lock boundary the action gets *queued* rather than
-executed immediately, so this can fire slightly before the actual effect, or
-for something that ends up queued/cancelled. Fine for "flash briefly when
-Provoke is used," not frame-perfect for syncing to a specific VFX moment.
-
-Action entries have no animation state to poll (unlike emotes), so **Duration
-is always forced on for them** regardless of the checkbox - it's their only
-way back to normal gear. The Add-mapping UI defaults new Action entries to a
-2s Duration; adjust it in the table after adding.
-
-Pick Emote vs Action via the radio buttons above the search box in the Add
-row - both search their respective Lumina sheet (`Emote`/`Action`) by name,
-the same safe-lookup pattern either way.
+**Known issue:** state preservation has not been confirmed reliable in
+testing yet - `RestoreState` can report success without a visible change.
+`GetStateBase64`/`ApplyState` are confirmed to exist in Glamourer's IPC
+surface, and the `ApplyFlag.Equipment | ApplyFlag.Customization` fix (see
+the confidence note in `GlamourerIpc.cs`) addressed one confirmed cause of a
+silent no-op, but if it's still not restoring correctly, that's the next
+thing to dig into - the fallback to plain `Revert` at least keeps gear from
+getting permanently stuck either way.
 
 ## Known limitations / things to sanity-check yourself
 
@@ -141,8 +122,7 @@ the same safe-lookup pattern either way.
 - `ResolveEmperorsSetItemIds` looks up each Emperor's Set item by exact name
   match in Lumina's `Item` sheet at startup and logs a warning to `/xllog`
   for any it can't find (check there if Emperor's Set mode seems to skip a
-  slot). If Square Enix ever renames one of these items, the lookup for that
-  slot will fail gracefully (that slot just won't change) rather than crash.
+  slot).
 - `StripAllGear` sends item ID `0` for "nothing" on Smallclothes mode. Stains
   are sent as `List<byte> { 0, 0 }` (see the confidence note at the top of
   `GlamourerIpc.cs`) - both were confirmed via live runtime errors during
@@ -152,19 +132,11 @@ the same safe-lookup pattern either way.
 
 ## Debugging
 
-Run `/flash debug` (or check "Debug mode" in the config window). With it
-on, every emote Flash sees - native or chat-based - gets echoed to chat and
-`/xllog`, along with which step it passed or failed at (no match, Glamourer
-unavailable, per-slot results, etc.). Toggle it off once confirmed working,
-since it's noisy.
-
-For finding the exact ID of an emote or action to enter in the manual
-override field, use **`/flash log`** (or the "Debug Log" button in Flash
-Config) instead - it opens a dedicated, persistent window listing every
-locally-detected emote/action with its resolved name, real numeric ID, and
-whether it matched a configured entry, plus a Copy button per row. Unlike
-Debug Mode's chat echo, this is always recording in the background and
-doesn't need to be toggled on first - just use the emote/action, then check
-the log. Only covers local-player native detections (the ones that actually
-carry a numeric ID); chat-detected remote-player emotes aren't listed here
-since they never have one (see "How emote detection works").
+Run `/flash log` (or the "Debug Log" button in Flash Config) to open a
+dedicated, persistent window listing every local-player emote you use, with
+its resolved name, real numeric ID, and whether it matched a configured
+entry - plus a Copy button per row. It's always recording in the background,
+no toggle needed - just use an emote, then check the log. Only covers
+local-player native detections (the ones that carry a numeric ID);
+chat-detected remote-player emotes aren't listed here since they never have
+one.

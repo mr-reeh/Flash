@@ -26,11 +26,11 @@ public class DebugLogUi
             return;
         }
 
-        ImGui.TextWrapped("Every emote or action you use shows up here with its exact ID and name - " +
-                           "use these in the manual ID override field in Flash Config when a name search " +
-                           "grabs the wrong sheet row. This only covers your own local-player emotes/actions " +
-                           "(the native-detected ones that actually carry a numeric ID); other players' " +
-                           "emotes still go through Debug Mode's chat echo instead.");
+        ImGui.TextWrapped("Every emote you use shows up here with its exact ID and name - use it to " +
+                           "confirm detection is actually firing, and to double-check which emote a " +
+                           "mapping matched. This only covers your own local-player emotes (the " +
+                           "native-detected ones that actually carry a numeric ID); other players' " +
+                           "emotes aren't listed here.");
 
         if (ImGui.Button("Clear"))
             this.plugin.DebugLog.Clear();
