@@ -50,5 +50,3 @@ on or off individually from the config window.
 ## 🤖 AI Assistance & Attribution
 This project is AI-assisted. 
 * **Core Coding & Architecture:** Assisted by [Anthropic's Claude](https://claude.ai) 
-* **Human Oversight:** [Your Name/GitHub Handle] (Review, debugging, and deployment)
-
