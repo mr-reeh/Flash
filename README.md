@@ -36,7 +36,7 @@ dotnet build -c Debug
 2. Under "Dev Plugin Locations", add the full path to the built `.dll` (or
    its containing folder).
 3. Run `/xlplugins`, find Flash under Dev Tools, and load it.
-4. Run `/emotegear` to open the config window ("Emote Config").
+4. Run `/emotegear` to open the config window ("Flash Config").
 
 ## Using it
 
@@ -47,6 +47,9 @@ dotnet build -c Debug
    it matches.
 4. Optionally set a **Delay (s)** per entry - how long to wait after the
    emote starts before gear changes.
+5. Drag the `::` handle on the left of a row to reorder the list (matching
+   only stops at the first enabled entry that fires, so order can matter if
+   you ever have overlapping triggers).
 5. Perform the emote in-game - gear changes per the mode above, and stays
    that way until you do something not configured (a different, unmapped
    emote, or - for looping emotes - simply nothing, since they never

@@ -2,19 +2,19 @@
   {
     "Author": "MrReeh",
     "Name": "Flash",
-    "Punchline": "Automatically applies a Glamourer gear design when you use a specified emote.",
-    "Description": "Watches for configured emotes and swaps your outfit via Glamourer while (and optionally only while) you're performing them, then reverts back to your normal gear afterward.",
     "InternalName": "Flash",
     "AssemblyVersion": "0.1.0.0",
-    "TestingAssemblyVersion": null,
-    "RepoUrl": "https://github.com/mr-reeh/flash",
+    "Description": "Watches for configured emotes or combat actions and swaps a character's gear via Glamourer to Smallclothes or the Emperor's New Set while (or briefly after) they're triggered, then reverts back to normal gear.",
+    "Punchline": "Changes a character's gear to Smallclothes or the Emperor's Set when a specified emote or action is used.",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
-    "IsHide": false,
-    "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://github.com/mr-reeh/flash/releases/download/v0.1.0.0/latest.zip",
-    "DownloadLinkTesting": "https://github.com/mr-reeh/flash/releases/download/v0.1.0.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/mr-reeh/flash/releases/download/v0.1.0.0/latest.zip",
-    "LastUpdate": "1700000000"
+    "Tags": [ "glamour", "emote", "roleplay" ],
+    "CategoryTags": [ "other" ],
+    "RepoUrl": "https://github.com/mr-reeh/flash",
+    "IconUrl": "",
+    "AcceptsFeedback": true,
+    "DownloadLinkInstall": "https://github.com/mr-reeh/flash/releases/latest/download/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/mr-reeh/flash/releases/latest/download/latest.zip",
+    "DownloadLinkTesting": "https://github.com/mr-reeh/flash/releases/latest/download/latest.zip"
   }
 ]

@@ -27,7 +27,7 @@ public class PluginUi
             return;
 
         ImGui.SetNextWindowSize(new Vector2(560, 480), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Emote Config", ref this.IsOpen))
+        if (!ImGui.Begin("Flash Config", ref this.IsOpen))
         {
             ImGui.End();
             return;
@@ -231,15 +231,16 @@ public class PluginUi
             return;
         }
 
-        if (!ImGui.BeginTable("EmoteGearTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        if (!ImGui.BeginTable("EmoteGearTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             return;
 
-        ImGui.TableSetupColumn("On");
-        ImGui.TableSetupColumn("Trigger");
-        ImGui.TableSetupColumn("Delay (s)");
-        ImGui.TableSetupColumn("Use duration");
-        ImGui.TableSetupColumn("Duration (s)");
-        ImGui.TableSetupColumn("");
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 20f);
+        ImGui.TableSetupColumn("On", ImGuiTableColumnFlags.WidthFixed, 28f);
+        ImGui.TableSetupColumn("Trigger", ImGuiTableColumnFlags.WidthStretch, 3f);
+        ImGui.TableSetupColumn("Delay (s)", ImGuiTableColumnFlags.WidthFixed, 90f);
+        ImGui.TableSetupColumn("Duration", ImGuiTableColumnFlags.WidthFixed, 30f);
+        ImGui.TableSetupColumn("Duration (s)", ImGuiTableColumnFlags.WidthFixed, 90f);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 60f);
         ImGui.TableHeadersRow();
 
         var toRemove = -1;
@@ -249,6 +250,25 @@ public class PluginUi
             var entry = entries[i];
             ImGui.PushID(i);
             ImGui.TableNextRow();
+
+            // Drag handle - click and drag vertically to reorder. Standard Dear ImGui
+            // reorderable-list pattern (drag-delta swap), not the payload drag-drop API.
+            ImGui.TableNextColumn();
+            ImGui.Selectable("::", false);
+            if (ImGui.IsItemActive() && !ImGui.IsItemHovered())
+            {
+                var dragDelta = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
+                var targetIndex = i + (dragDelta < 0f ? -1 : 1);
+                if (targetIndex >= 0 && targetIndex < entries.Count)
+                {
+                    (entries[i], entries[targetIndex]) = (entries[targetIndex], entries[i]);
+                    ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
+                    this.plugin.Configuration.Save();
+                }
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Drag to reorder.");
 
             ImGui.TableNextColumn();
             var rowEnabled = entry.Enabled;

@@ -1,8 +1,8 @@
 {
-  "Author": "Hayden",
+  "Author": "MrReeh",
   "Name": "Flash",
-  "Punchline": "Automatically applies a Glamourer gear design when you use a specified emote.",
-  "Description": "Watches for configured emotes and swaps your outfit via Glamourer while (and optionally only while) you're performing them, then reverts back to your normal gear afterward.",
+  "Punchline": "Changes a character's gear to Smallclothes or the Emperor's Set when a specified emote or action is used.",
+  "Description": "Watches for configured emotes or combat actions and swaps a character's gear via Glamourer to Smallclothes or the Emperor's New Set while (or briefly after) they're triggered, then reverts back to normal gear.",
   "ApplicableVersion": "any",
   "Tags": ["glamour", "emote", "roleplay"]
 }
