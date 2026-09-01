@@ -106,7 +106,8 @@ public class PluginUi
                 EmoteId = matched!.Value.RowId,
                 EmoteName = matched.Value.Name.ExtractText(),
                 RevertAfterEmote = true,
-                RevertDelaySeconds = 5.0f,
+                TriggerDelaySeconds = 0f,
+                StripDurationSeconds = 5.0f,
                 LocalPlayerOnly = true,
                 Enabled = true,
             });
@@ -128,13 +129,14 @@ public class PluginUi
             return;
         }
 
-        if (!ImGui.BeginTable("EmoteGearTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        if (!ImGui.BeginTable("EmoteGearTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             return;
 
         ImGui.TableSetupColumn("On");
         ImGui.TableSetupColumn("Emote");
-        ImGui.TableSetupColumn("Revert after");
         ImGui.TableSetupColumn("Delay (s)");
+        ImGui.TableSetupColumn("Revert after");
+        ImGui.TableSetupColumn("Duration (s)");
         ImGui.TableSetupColumn("");
         ImGui.TableHeadersRow();
 
@@ -158,6 +160,18 @@ public class PluginUi
             ImGui.TextUnformatted($"{entry.EmoteName} ({entry.EmoteId})");
 
             ImGui.TableNextColumn();
+            var triggerDelay = entry.TriggerDelaySeconds;
+            ImGui.SetNextItemWidth(80);
+            if (ImGui.DragFloat("##triggerDelay", ref triggerDelay, 0.1f, 0.0f, 60.0f, "%.1f"))
+            {
+                entry.TriggerDelaySeconds = triggerDelay;
+                this.plugin.Configuration.Save();
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("How long to wait after the emote starts before stripping gear.");
+
+            ImGui.TableNextColumn();
             var revert = entry.RevertAfterEmote;
             if (ImGui.Checkbox("##revert", ref revert))
             {
@@ -167,13 +181,16 @@ public class PluginUi
 
             ImGui.TableNextColumn();
             ImGui.BeginDisabled(!entry.RevertAfterEmote);
-            var delay = entry.RevertDelaySeconds;
+            var duration = entry.StripDurationSeconds;
             ImGui.SetNextItemWidth(80);
-            if (ImGui.DragFloat("##delay", ref delay, 0.1f, 0.0f, 60.0f, "%.1f"))
+            if (ImGui.DragFloat("##duration", ref duration, 0.1f, 0.0f, 300.0f, "%.1f"))
             {
-                entry.RevertDelaySeconds = delay;
+                entry.StripDurationSeconds = duration;
                 this.plugin.Configuration.Save();
             }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("How long to stay stripped before gear comes back.");
 
             ImGui.EndDisabled();
 

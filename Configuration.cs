@@ -17,11 +17,14 @@ public class EmoteGearEntry
     /// <summary>Display name cached for the config UI (not authoritative, just convenience).</summary>
     public string EmoteName { get; set; } = string.Empty;
 
-    /// <summary>If true, gear is restored after the emote finishes (after RevertDelaySeconds).</summary>
+    /// <summary>If true, gear is restored after StripDurationSeconds elapses.</summary>
     public bool RevertAfterEmote { get; set; } = true;
 
+    /// <summary>How long (seconds) to wait after the emote is detected before stripping gear.</summary>
+    public float TriggerDelaySeconds { get; set; } = 0f;
+
     /// <summary>How long (seconds) to stay stripped before restoring, if RevertAfterEmote is true.</summary>
-    public float RevertDelaySeconds { get; set; } = 5.0f;
+    public float StripDurationSeconds { get; set; } = 5.0f;
 
     /// <summary>Only trigger for the local player, never for other actors performing the emote nearby.</summary>
     public bool LocalPlayerOnly { get; set; } = true;
