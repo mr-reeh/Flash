@@ -24,7 +24,7 @@ public class PluginUi
             return;
 
         ImGui.SetNextWindowSize(new Vector2(560, 480), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Emote Gear Config", ref this.IsOpen))
+        if (!ImGui.Begin("Emote Config", ref this.IsOpen))
         {
             ImGui.End();
             return;
@@ -46,7 +46,7 @@ public class PluginUi
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Echoes every emote chat line seen to chat, matched or not - use this to confirm detection is firing.");
+            ImGui.SetTooltip("Echoes every emote detected to chat, matched or not - use this to confirm detection is firing.");
 
         var glamourerReady = this.plugin.Glamourer.IsAvailable();
         ImGui.SameLine();
@@ -55,8 +55,31 @@ public class PluginUi
             glamourerReady ? "Glamourer: connected" : "Glamourer: not detected");
 
         ImGui.Separator();
-        ImGui.TextWrapped("Add a mapping: search for an emote and click Add. When it's used, " +
-                           "gear is stripped from head/body/hands/legs/feet/ears/neck/wrists/rings.");
+        ImGui.TextUnformatted("Gear mode:");
+        ImGui.SameLine();
+
+        var stripMode = this.plugin.Configuration.StripMode;
+
+        var isSmallclothes = stripMode == StripMode.Smallclothes;
+        if (ImGui.RadioButton("Smallclothes", isSmallclothes))
+        {
+            this.plugin.Configuration.StripMode = StripMode.Smallclothes;
+            this.plugin.Configuration.Save();
+        }
+
+        ImGui.SameLine();
+
+        var isEmperors = stripMode == StripMode.EmperorsSet;
+        if (ImGui.RadioButton("Emperor's Set", isEmperors))
+        {
+            this.plugin.Configuration.StripMode = StripMode.EmperorsSet;
+            this.plugin.Configuration.Save();
+        }
+
+        ImGui.Separator();
+        ImGui.TextWrapped("Add a mapping: search for an emote and click Add. When it's used, gear in " +
+                           "head/body/hands/legs/feet/ears/neck/wrists/rings is replaced per the mode above, " +
+                           "and stays that way until the animation changes to something not configured.");
 
         this.DrawAddRow();
 
@@ -105,9 +128,7 @@ public class PluginUi
             {
                 EmoteId = matched!.Value.RowId,
                 EmoteName = matched.Value.Name.ExtractText(),
-                RevertAfterEmote = true,
                 TriggerDelaySeconds = 0f,
-                StripDurationSeconds = 5.0f,
                 LocalPlayerOnly = true,
                 Enabled = true,
             });
@@ -129,14 +150,12 @@ public class PluginUi
             return;
         }
 
-        if (!ImGui.BeginTable("EmoteGearTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        if (!ImGui.BeginTable("EmoteGearTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             return;
 
         ImGui.TableSetupColumn("On");
         ImGui.TableSetupColumn("Emote");
         ImGui.TableSetupColumn("Delay (s)");
-        ImGui.TableSetupColumn("Revert after");
-        ImGui.TableSetupColumn("Duration (s)");
         ImGui.TableSetupColumn("");
         ImGui.TableHeadersRow();
 
@@ -169,30 +188,7 @@ public class PluginUi
             }
 
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("How long to wait after the emote starts before stripping gear.");
-
-            ImGui.TableNextColumn();
-            var revert = entry.RevertAfterEmote;
-            if (ImGui.Checkbox("##revert", ref revert))
-            {
-                entry.RevertAfterEmote = revert;
-                this.plugin.Configuration.Save();
-            }
-
-            ImGui.TableNextColumn();
-            ImGui.BeginDisabled(!entry.RevertAfterEmote);
-            var duration = entry.StripDurationSeconds;
-            ImGui.SetNextItemWidth(80);
-            if (ImGui.DragFloat("##duration", ref duration, 0.1f, 0.0f, 300.0f, "%.1f"))
-            {
-                entry.StripDurationSeconds = duration;
-                this.plugin.Configuration.Save();
-            }
-
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("How long to stay stripped before gear comes back.");
-
-            ImGui.EndDisabled();
+                ImGui.SetTooltip("How long to wait after the emote starts before gear changes.");
 
             ImGui.TableNextColumn();
             if (ImGui.Button("Remove"))

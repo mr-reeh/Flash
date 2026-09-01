@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Glamourer.Api.Enums;
 using Glamourer.Api.IpcSubscribers;
+using Lumina.Excel.Sheets;
 
 namespace Flash;
 
@@ -29,9 +31,11 @@ public class GlamourerIpc
     private readonly SetItem setItem;
     private readonly RevertState revertState;
 
+    private Dictionary<ApiEquipSlot, uint>? emperorsSetItemIds;
+
     /// <summary>
-    /// The equipment slots this plugin strips. Deliberately excludes MainHand/OffHand
-    /// (weapons) since the request was for armor/accessory slots only.
+    /// The equipment slots this plugin strips/swaps. Deliberately excludes MainHand/
+    /// OffHand (weapons) since the request was for armor/accessory slots only.
     /// </summary>
     public static readonly IReadOnlyList<ApiEquipSlot> StrippableSlots = new[]
     {
@@ -45,6 +49,23 @@ public class GlamourerIpc
         ApiEquipSlot.Wrists,
         ApiEquipSlot.RFinger,
         ApiEquipSlot.LFinger,
+    };
+
+    // Item names as they appear in Lumina's Item sheet. Resolved to real ItemIds at
+    // runtime (see ResolveEmperorsSetItemIds) rather than hardcoded, since a wrong
+    // hardcoded ID would silently equip the wrong item with no compile-time signal.
+    private static readonly IReadOnlyDictionary<ApiEquipSlot, string> EmperorsSetItemNames = new Dictionary<ApiEquipSlot, string>
+    {
+        [ApiEquipSlot.Head] = "The Emperor's New Hat",
+        [ApiEquipSlot.Body] = "The Emperor's New Robe",
+        [ApiEquipSlot.Hands] = "The Emperor's New Gloves",
+        [ApiEquipSlot.Legs] = "The Emperor's New Breeches",
+        [ApiEquipSlot.Feet] = "The Emperor's New Boots",
+        [ApiEquipSlot.Ears] = "The Emperor's New Earrings",
+        [ApiEquipSlot.Neck] = "The Emperor's New Necklace",
+        [ApiEquipSlot.Wrists] = "The Emperor's New Bracelet",
+        [ApiEquipSlot.RFinger] = "The Emperor's New Ring",
+        [ApiEquipSlot.LFinger] = "The Emperor's New Ring",
     };
 
     public GlamourerIpc(IDalamudPluginInterface pi, IPluginLog log)
@@ -71,17 +92,63 @@ public class GlamourerIpc
     }
 
     /// <summary>
-    /// Sets every slot in <see cref="StrippableSlots"/> to "nothing" on the given actor.
-    /// Attempts every slot even after a failure, so one bad slot doesn't leave the
-    /// character half-dressed. Pass <paramref name="onSlotResult"/> to get a line per
-    /// slot (e.g. to echo to chat in debug mode) instead of only the aggregate result.
+    /// Looks up each Emperor's New Set item by name in Lumina's Item sheet and caches
+    /// the resulting ItemIds. Call once at plugin startup (DataManager is ready by then).
+    /// Safe to call more than once; only does the sheet scan the first time.
     /// </summary>
-    public bool StripAllGear(ICharacter target, uint lockKey = 0, Action<string>? onSlotResult = null)
+    public void ResolveEmperorsSetItemIds(IDataManager dataManager)
+    {
+        if (this.emperorsSetItemIds != null)
+            return;
+
+        var sheet = dataManager.GetExcelSheet<Item>();
+        if (sheet == null)
+        {
+            this.log.Warning("[Flash] Could not load the Item sheet - Emperor's Set mode won't have any items to equip.");
+            this.emperorsSetItemIds = new Dictionary<ApiEquipSlot, uint>();
+            return;
+        }
+
+        var resolved = new Dictionary<ApiEquipSlot, uint>();
+        foreach (var (slot, itemName) in EmperorsSetItemNames)
+        {
+            var row = sheet.FirstOrDefault(item => string.Equals(item.Name.ExtractText(), itemName, StringComparison.OrdinalIgnoreCase));
+            if (row.RowId != 0)
+            {
+                resolved[slot] = row.RowId;
+            }
+            else
+            {
+                this.log.Warning($"[Flash] Could not find item '{itemName}' in the Item sheet - {slot} will be skipped in Emperor's Set mode.");
+            }
+        }
+
+        this.emperorsSetItemIds = resolved;
+        this.log.Information($"[Flash] Resolved {resolved.Count}/{EmperorsSetItemNames.Count} Emperor's Set items.");
+    }
+
+    /// <summary>
+    /// Sets every slot in <see cref="StrippableSlots"/> according to <paramref name="mode"/> -
+    /// item 0 ("nothing") for Smallclothes, or the resolved Emperor's Set item for
+    /// EmperorsSet. Attempts every slot even after a failure, so one bad slot doesn't
+    /// leave the character half-dressed. Pass <paramref name="onSlotResult"/> to get a
+    /// line per slot (e.g. to echo to chat in debug mode) instead of only the aggregate
+    /// result.
+    /// </summary>
+    public bool StripAllGear(ICharacter target, StripMode mode, uint lockKey = 0, Action<string>? onSlotResult = null)
     {
         var allSucceeded = true;
 
         foreach (var slot in StrippableSlots)
         {
+            ulong itemId = 0;
+            if (mode == StripMode.EmperorsSet
+                && this.emperorsSetItemIds != null
+                && this.emperorsSetItemIds.TryGetValue(slot, out var resolvedId))
+            {
+                itemId = resolvedId;
+            }
+
             try
             {
                 // ItemId 0 represents an empty/unequipped slot. Stains must be a
@@ -90,7 +157,7 @@ public class GlamourerIpc
                 // byte[] as a base64 string (confirmed via a live IpcTypeMismatchError),
                 // which then fails to deserialize into IReadOnlyList<byte>. List<byte>
                 // serializes as a normal JSON array and deserializes correctly.
-                var result = this.setItem.Invoke(target.ObjectIndex, slot, 0, new List<byte> { 0, 0 }, lockKey);
+                var result = this.setItem.Invoke(target.ObjectIndex, slot, itemId, new List<byte> { 0, 0 }, lockKey);
 
                 if (result != GlamourerApiEc.Success && result != GlamourerApiEc.NothingDone)
                 {
@@ -100,7 +167,7 @@ public class GlamourerIpc
                 }
                 else
                 {
-                    onSlotResult?.Invoke($"{slot}: ok ({result})");
+                    onSlotResult?.Invoke($"{slot}: ok ({result}, item {itemId})");
                 }
             }
             catch (Exception ex)

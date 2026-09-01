@@ -6,6 +6,18 @@ using Dalamud.Plugin;
 namespace Flash;
 
 /// <summary>
+/// Which gear the character ends up wearing while a mapped emote is active.
+/// </summary>
+public enum StripMode
+{
+    /// <summary>Every slot set to "nothing" - fully bare.</summary>
+    Smallclothes,
+
+    /// <summary>Every slot set to the corresponding Emperor's New Set piece.</summary>
+    EmperorsSet,
+}
+
+/// <summary>
 /// One emote -> gear mapping.
 /// </summary>
 [Serializable]
@@ -17,14 +29,8 @@ public class EmoteGearEntry
     /// <summary>Display name cached for the config UI (not authoritative, just convenience).</summary>
     public string EmoteName { get; set; } = string.Empty;
 
-    /// <summary>If true, gear is restored after StripDurationSeconds elapses.</summary>
-    public bool RevertAfterEmote { get; set; } = true;
-
     /// <summary>How long (seconds) to wait after the emote is detected before stripping gear.</summary>
     public float TriggerDelaySeconds { get; set; } = 0f;
-
-    /// <summary>How long (seconds) to stay stripped before restoring, if RevertAfterEmote is true.</summary>
-    public float StripDurationSeconds { get; set; } = 5.0f;
 
     /// <summary>Only trigger for the local player, never for other actors performing the emote nearby.</summary>
     public bool LocalPlayerOnly { get; set; } = true;
@@ -44,9 +50,13 @@ public class Configuration : IPluginConfiguration
     /// <summary>Master on/off switch for the whole plugin.</summary>
     public bool PluginEnabled { get; set; } = true;
 
-    /// <summary>When true, every StandardEmote/CustomEmote chat line seen is logged and
-    /// echoed to chat (whether it matched a configured entry or not), so you can confirm
-    /// detection is actually firing. Toggle via '/emotegear debug'.</summary>
+    /// <summary>Whether stripped gear becomes "nothing" or the Emperor's New Set. Global -
+    /// applies to every mapping, not set per-entry.</summary>
+    public StripMode StripMode { get; set; } = StripMode.Smallclothes;
+
+    /// <summary>When true, every emote seen (native hook or chat) is logged and echoed to
+    /// chat (whether it matched a configured entry or not), so you can confirm detection
+    /// is actually firing. Toggle via '/emotegear debug'.</summary>
     public bool DebugMode { get; set; } = false;
 
     private IDalamudPluginInterface? pluginInterface;

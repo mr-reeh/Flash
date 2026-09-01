@@ -27,16 +27,17 @@ public sealed class Plugin : IDalamudPlugin
     private readonly EmoteWatcher emoteWatcher;
     private readonly EmoteHook emoteHook;
 
-    // Tracks emotes waiting out their trigger delay before gear gets stripped.
+    // Emotes waiting out their trigger delay before gear gets stripped/swapped.
     private readonly List<PendingStrip> pendingStrips = new();
 
-    // Tracks characters whose gear was stripped, so it can be restored later.
-    private readonly List<PendingRevert> pendingReverts = new();
+    // Characters currently wearing Flash-altered gear, so a later unmatched emote knows
+    // to revert them. Gear persists until the animation actually changes to something
+    // not configured - there is no timer.
+    private readonly HashSet<ulong> alteredCharacters = new();
 
     private const string CommandName = "/emotegear";
 
     private readonly record struct PendingStrip(ulong GameObjectId, EmoteGearEntry Entry, DateTime StripAt);
-    private readonly record struct PendingRevert(ulong GameObjectId, DateTime RevertAt);
 
     public Plugin()
     {
@@ -44,6 +45,7 @@ public sealed class Plugin : IDalamudPlugin
         this.Configuration.Initialize(PluginInterface);
 
         this.Glamourer = new GlamourerIpc(PluginInterface, Log);
+        this.Glamourer.ResolveEmperorsSetItemIds(DataManager);
 
         this.emoteWatcher = new EmoteWatcher(ChatGui, Log);
         this.emoteWatcher.EmoteMessageSeen += this.OnEmoteMessageSeen;
@@ -59,7 +61,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(this.OnCommand)
         {
-            HelpMessage = "Open the emote gear config window. '/emotegear toggle' enables/disables the plugin. " +
+            HelpMessage = "Open the emote config window. '/emotegear toggle' enables/disables the plugin. " +
                           "'/emotegear debug' toggles verbose logging of every emote detected, to chat and /xllog.",
         });
     }
@@ -81,7 +83,7 @@ public sealed class Plugin : IDalamudPlugin
             this.Configuration.DebugMode = !this.Configuration.DebugMode;
             this.Configuration.Save();
             ChatGui.Print($"[Flash] Debug mode {(this.Configuration.DebugMode ? "ON" : "OFF")} - " +
-                          "every emote chat line will be logged here" +
+                          "every emote detected will be logged here" +
                           (this.Configuration.DebugMode ? "." : " (now suppressed)."));
             return;
         }
@@ -111,24 +113,6 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        EmoteGearEntry? match = null;
-        foreach (var entry in this.Configuration.Entries)
-        {
-            if (entry.Enabled && entry.EmoteId == emoteId)
-            {
-                match = entry;
-                break;
-            }
-        }
-
-        if (match == null)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...no configured emote id matched.");
-
-            return;
-        }
-
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
         {
@@ -138,15 +122,16 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        this.ScheduleStrip(match, localPlayer);
+        var match = this.FindMatchById(emoteId);
+        this.HandleEmoteForCharacter(match, localPlayer);
     }
 
     /// <summary>
     /// Called from EmoteWatcher whenever a StandardEmote/CustomEmote line appears in
     /// chat. Local-player matches are skipped here - EmoteHook's native detection is
-    /// authoritative for those, and both firing would double-strip. This path only
-    /// matters for LocalPlayerOnly=false entries, detecting other characters' emotes,
-    /// and only when the client's "Log Emotes" setting is on.
+    /// authoritative for those, and both firing would double-handle the same emote. This
+    /// path only matters for LocalPlayerOnly=false entries, detecting other characters'
+    /// emotes, and only when the client's "Log Emotes" setting is on.
     ///
     /// Matching here is a case-insensitive substring check of the configured emote's
     /// name against the rendered chat text (see EmoteWatcher.cs for why - chat text
@@ -185,30 +170,6 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        EmoteGearEntry? match = null;
-        foreach (var entry in this.Configuration.Entries)
-        {
-            if (entry.Enabled
-                && !entry.LocalPlayerOnly
-                && !string.IsNullOrWhiteSpace(entry.EmoteName)
-                && messageText.Contains(entry.EmoteName, StringComparison.OrdinalIgnoreCase))
-            {
-                match = entry;
-                break;
-            }
-        }
-
-        if (match == null)
-        {
-            if (this.Configuration.DebugMode)
-                ChatGui.Print("[Flash] ...no configured (non-local-only) emote name matched this text.");
-
-            return;
-        }
-
-        if (this.Configuration.DebugMode)
-            ChatGui.Print($"[Flash] ...matched entry '{match.EmoteName}' (id {match.EmoteId}).");
-
         var target = this.FindCharacterByName(senderName);
         if (target == null)
         {
@@ -218,21 +179,75 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        this.ScheduleStrip(match, target);
+        var match = this.FindMatchByText(messageText);
+        this.HandleEmoteForCharacter(match, target);
     }
 
-    private void ScheduleStrip(EmoteGearEntry match, ICharacter target)
+    private EmoteGearEntry? FindMatchById(ushort emoteId)
     {
-        if (this.Configuration.DebugMode)
+        foreach (var entry in this.Configuration.Entries)
         {
-            ChatGui.Print($"[Flash] ...scheduling strip on '{target.Name.TextValue}' in " +
-                          $"{match.TriggerDelaySeconds:0.0}s (duration {match.StripDurationSeconds:0.0}s).");
+            if (entry.Enabled && entry.EmoteId == emoteId)
+                return entry;
         }
 
-        this.pendingStrips.Add(new PendingStrip(
-            target.GameObjectId,
-            match,
-            DateTime.UtcNow.AddSeconds(match.TriggerDelaySeconds)));
+        return null;
+    }
+
+    private EmoteGearEntry? FindMatchByText(string messageText)
+    {
+        foreach (var entry in this.Configuration.Entries)
+        {
+            if (entry.Enabled
+                && !entry.LocalPlayerOnly
+                && !string.IsNullOrWhiteSpace(entry.EmoteName)
+                && messageText.Contains(entry.EmoteName, StringComparison.OrdinalIgnoreCase))
+            {
+                return entry;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Shared handling for both detection paths once a target character and (possibly
+    /// null) matched entry are known. If matched, schedules a strip. If not matched and
+    /// the character currently has Flash-altered gear, that means the animation changed
+    /// to something not configured, so gear is reverted immediately. Either way, any
+    /// still-pending strip for this character from a previous emote is cancelled first,
+    /// so a rapid animation change can't apply a stale strip after the fact.
+    /// </summary>
+    private void HandleEmoteForCharacter(EmoteGearEntry? match, ICharacter target)
+    {
+        this.pendingStrips.RemoveAll(p => p.GameObjectId == target.GameObjectId);
+
+        if (match != null)
+        {
+            if (this.Configuration.DebugMode)
+            {
+                ChatGui.Print($"[Flash] ...matched entry '{match.EmoteName}' (id {match.EmoteId}) - " +
+                              $"scheduling strip on '{target.Name.TextValue}' in {match.TriggerDelaySeconds:0.0}s.");
+            }
+
+            this.pendingStrips.Add(new PendingStrip(
+                target.GameObjectId,
+                match,
+                DateTime.UtcNow.AddSeconds(match.TriggerDelaySeconds)));
+
+            return;
+        }
+
+        if (this.Configuration.DebugMode)
+            ChatGui.Print("[Flash] ...no configured emote matched.");
+
+        if (this.alteredCharacters.Remove(target.GameObjectId))
+        {
+            if (this.Configuration.DebugMode)
+                ChatGui.Print($"[Flash] ...animation changed, reverting '{target.Name.TextValue}'.");
+
+            this.Glamourer.Revert(target);
+        }
     }
 
     private ICharacter? FindCharacterByName(string name)
@@ -247,12 +262,6 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private void OnFrameworkUpdate(IFramework framework)
-    {
-        this.ProcessPendingStrips();
-        this.ProcessPendingReverts();
-    }
-
-    private void ProcessPendingStrips()
     {
         if (this.pendingStrips.Count == 0)
             return;
@@ -296,44 +305,17 @@ public sealed class Plugin : IDalamudPlugin
 
             var stripped = this.Glamourer.StripAllGear(
                 target,
+                this.Configuration.StripMode,
                 onSlotResult: this.Configuration.DebugMode
                     ? (line => ChatGui.Print($"[Flash]   {line}"))
                     : null);
 
             if (this.Configuration.DebugMode)
-                ChatGui.Print($"[Flash] ...StripAllGear on '{target.Name.TextValue}' returned success={stripped}.");
+                ChatGui.Print($"[Flash] ...StripAllGear on '{target.Name.TextValue}' " +
+                              $"({this.Configuration.StripMode}) returned success={stripped}.");
 
-            if (stripped && pending.Entry.RevertAfterEmote)
-            {
-                this.pendingReverts.Add(new PendingRevert(
-                    pending.GameObjectId,
-                    DateTime.UtcNow.AddSeconds(pending.Entry.StripDurationSeconds)));
-            }
-        }
-    }
-
-    private void ProcessPendingReverts()
-    {
-        if (this.pendingReverts.Count == 0)
-            return;
-
-        var now = DateTime.UtcNow;
-        for (var i = this.pendingReverts.Count - 1; i >= 0; i--)
-        {
-            var pending = this.pendingReverts[i];
-            if (pending.RevertAt > now)
-                continue;
-
-            this.pendingReverts.RemoveAt(i);
-
-            foreach (var obj in ObjectTable)
-            {
-                if (obj is ICharacter character && character.GameObjectId == pending.GameObjectId)
-                {
-                    this.Glamourer.Revert(character);
-                    break;
-                }
-            }
+            if (stripped)
+                this.alteredCharacters.Add(pending.GameObjectId);
         }
     }
 
