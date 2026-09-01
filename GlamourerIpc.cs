@@ -42,8 +42,11 @@ public class GlamourerIpc
     private Dictionary<ApiEquipSlot, uint>? emperorsSetItemIds;
 
     /// <summary>
-    /// The equipment slots this plugin strips/swaps. Deliberately excludes MainHand/
-    /// OffHand (weapons) since the request was for armor/accessory slots only.
+    /// The equipment slots this plugin can strip/swap. Deliberately excludes MainHand/
+    /// OffHand (weapons) since the request was for armor/accessory slots only. Which of
+    /// these are actually touched on a given strip is controlled by
+    /// Configuration.EnabledSlots, not this list - this is the master set used to build
+    /// the checkbox UI and as the default when EnabledSlots isn't yet configured.
     /// </summary>
     public static readonly IReadOnlyList<ApiEquipSlot> StrippableSlots = new[]
     {
@@ -57,6 +60,22 @@ public class GlamourerIpc
         ApiEquipSlot.Wrists,
         ApiEquipSlot.RFinger,
         ApiEquipSlot.LFinger,
+    };
+
+    /// <summary>User-facing names for each slot in <see cref="StrippableSlots"/>, for the
+    /// per-slot checkboxes in the config UI.</summary>
+    public static readonly IReadOnlyDictionary<ApiEquipSlot, string> SlotDisplayNames = new Dictionary<ApiEquipSlot, string>
+    {
+        [ApiEquipSlot.Head] = "Head",
+        [ApiEquipSlot.Body] = "Body",
+        [ApiEquipSlot.Hands] = "Hands",
+        [ApiEquipSlot.Legs] = "Legs",
+        [ApiEquipSlot.Feet] = "Feet",
+        [ApiEquipSlot.Ears] = "Earrings",
+        [ApiEquipSlot.Neck] = "Necklace",
+        [ApiEquipSlot.Wrists] = "Bracelet",
+        [ApiEquipSlot.RFinger] = "Right Ring",
+        [ApiEquipSlot.LFinger] = "Left Ring",
     };
 
     // Item names as they appear in Lumina's Item sheet. Resolved to real ItemIds at
@@ -138,18 +157,18 @@ public class GlamourerIpc
     }
 
     /// <summary>
-    /// Sets every slot in <see cref="StrippableSlots"/> according to <paramref name="mode"/> -
+    /// Sets every slot in <paramref name="slots"/> according to <paramref name="mode"/> -
     /// item 0 ("nothing") for Smallclothes, or the resolved Emperor's Set item for
     /// EmperorsSet. Attempts every slot even after a failure, so one bad slot doesn't
     /// leave the character half-dressed. Pass <paramref name="onSlotResult"/> to get a
     /// line per slot (e.g. to echo to chat in debug mode) instead of only the aggregate
     /// result.
     /// </summary>
-    public bool StripAllGear(ICharacter target, StripMode mode, uint lockKey = 0, Action<string>? onSlotResult = null)
+    public bool StripAllGear(ICharacter target, StripMode mode, IEnumerable<ApiEquipSlot> slots, uint lockKey = 0, Action<string>? onSlotResult = null)
     {
         var allSucceeded = true;
 
-        foreach (var slot in StrippableSlots)
+        foreach (var slot in slots)
         {
             ulong itemId = 0;
             if (mode == StripMode.EmperorsSet

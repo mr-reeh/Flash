@@ -11,6 +11,9 @@ to Smallclothes, or swap it to the Emperor's New Set instead, your choice)
 the moment you play one of them. Your gear comes back on its own once the
 animation finishes.
 
+- **Slots** - choose exactly which slots get changed (Head, Body, Hands,
+  Legs, Feet, Earrings, Necklace, Bracelet, Left Ring, Right Ring) with
+  individual checkboxes. Leave a slot unchecked and Flash won't touch it.
 - **Delay** - if you don't want the change to happen the instant the emote
   starts, set a delay (in seconds) and Flash will wait before changing
   anything.
@@ -40,9 +43,10 @@ Then find and install **Flash** from `/xlplugins`.
 1. Run `/flash` in-game to open the config window.
 2. Choose whether emotes strip you to **Smallclothes** or the **Emperor's
    Set**.
-3. Search for an emote by name and click **Add mapping**.
-4. Optionally set a **Delay** and/or **Duration** for that mapping.
-5. That's it - play the emote in-game and watch it happen.
+3. Check or uncheck the slots you want Flash to actually change.
+4. Search for an emote by name and click **Add mapping**.
+5. Optionally set a **Delay** and/or **Duration** for that mapping.
+6. That's it - play the emote in-game and watch it happen.
 
 You can add as many emotes as you like, reorder them, and toggle each one
 on or off individually from the config window.

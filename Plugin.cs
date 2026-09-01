@@ -396,7 +396,7 @@ public sealed class Plugin : IDalamudPlugin
             if (savedState != null)
                 this.savedGlamourerStates[pending.GameObjectId] = savedState;
 
-            var stripped = this.Glamourer.StripAllGear(target, this.Configuration.StripMode);
+            var stripped = this.Glamourer.StripAllGear(target, this.Configuration.StripMode, this.Configuration.EnabledSlots);
 
             if (stripped)
             {

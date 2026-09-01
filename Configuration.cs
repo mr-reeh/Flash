@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Dalamud.Configuration;
 using Dalamud.Plugin;
+using Glamourer.Api.Enums;
 
 namespace Flash;
 
@@ -61,6 +62,10 @@ public class Configuration : IPluginConfiguration
     /// <summary>Whether stripped gear becomes "nothing" or the Emperor's New Set. Global -
     /// applies to every mapping, not set per-entry.</summary>
     public StripMode StripMode { get; set; } = StripMode.Smallclothes;
+
+    /// <summary>Which equipment slots actually get changed. Global - applies to every
+    /// mapping, not set per-entry. Defaults to every strippable slot.</summary>
+    public HashSet<ApiEquipSlot> EnabledSlots { get; set; } = new(GlamourerIpc.StrippableSlots);
 
     private IDalamudPluginInterface? pluginInterface;
 

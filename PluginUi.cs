@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Glamourer.Api.Enums;
 using Lumina.Excel.Sheets;
 
 namespace Flash;
@@ -23,7 +24,7 @@ public class PluginUi
         if (!this.IsOpen)
             return;
 
-        ImGui.SetNextWindowSize(new Vector2(560, 480), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(560, 560), ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("Flash Config", ref this.IsOpen))
         {
             ImGui.End();
@@ -73,9 +74,33 @@ public class PluginUi
         }
 
         ImGui.Separator();
-        ImGui.TextWrapped("Add a mapping: search for an emote and click Add. When it's used, gear in " +
-                           "head/body/hands/legs/feet/ears/neck/wrists/rings is replaced per the mode above. " +
-                           "It reverts once the animation finishes, or sooner if Use Duration is checked below.");
+        ImGui.TextUnformatted("Slots to change:");
+
+        if (ImGui.BeginTable("SlotsTable", 5))
+        {
+            foreach (var slot in GlamourerIpc.StrippableSlots)
+            {
+                ImGui.TableNextColumn();
+
+                var slotEnabled = this.plugin.Configuration.EnabledSlots.Contains(slot);
+                if (ImGui.Checkbox(GlamourerIpc.SlotDisplayNames[slot], ref slotEnabled))
+                {
+                    if (slotEnabled)
+                        this.plugin.Configuration.EnabledSlots.Add(slot);
+                    else
+                        this.plugin.Configuration.EnabledSlots.Remove(slot);
+
+                    this.plugin.Configuration.Save();
+                }
+            }
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Separator();
+        ImGui.TextWrapped("Add a mapping: search for an emote and click Add. When it's used, the checked " +
+                           "slots above are replaced per the mode above. It reverts once the animation " +
+                           "finishes, or sooner if Use Duration is checked below.");
 
         this.DrawAddRow();
 
