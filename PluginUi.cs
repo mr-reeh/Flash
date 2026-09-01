@@ -13,6 +13,7 @@ public class PluginUi
     public bool IsOpen;
 
     private string newEmoteSearch = string.Empty;
+    private int newEmoteIdOverride;
 
     public PluginUi(Plugin plugin)
     {
@@ -142,13 +143,48 @@ public class PluginUi
             ImGui.TextColored(new Vector4(1f, 0.6f, 0.4f, 1f), "No exact match yet - keep typing.");
         }
 
-        ImGui.BeginDisabled(matched == null);
+        ImGui.TextWrapped("Name search matches the first emote whose name contains your text, so a short " +
+                           "search (e.g. \"Hum\") can grab the wrong one (\"Thumbs Up\" before \"Hum\"). If " +
+                           "that happens, check the Flash Debug Log for the exact ID and enter it directly " +
+                           "below instead.");
+
+        ImGui.SetNextItemWidth(120);
+        ImGui.InputInt("Emote ID override (optional)", ref this.newEmoteIdOverride);
+
+        if (this.newEmoteIdOverride > 0 && sheet != null)
+        {
+            var overrideRow = sheet.GetRowOrDefault((uint)this.newEmoteIdOverride);
+            var overrideName = overrideRow?.Name.ExtractText();
+            var displayName = string.IsNullOrEmpty(overrideName)
+                ? "(unknown - not in Emote sheet, will still be saved)"
+                : overrideName;
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), $"Will use: {displayName} (Id {this.newEmoteIdOverride})");
+        }
+
+        var hasOverride = this.newEmoteIdOverride > 0;
+        ImGui.BeginDisabled(matched == null && !hasOverride);
         if (ImGui.Button("Add mapping"))
         {
+            uint emoteId;
+            string emoteName;
+
+            if (hasOverride)
+            {
+                emoteId = (uint)this.newEmoteIdOverride;
+                var overrideRow = sheet?.GetRowOrDefault(emoteId);
+                var overrideName = overrideRow?.Name.ExtractText();
+                emoteName = string.IsNullOrEmpty(overrideName) ? $"Emote {emoteId}" : overrideName;
+            }
+            else
+            {
+                emoteId = matched!.Value.RowId;
+                emoteName = matched.Value.Name.ExtractText();
+            }
+
             this.plugin.Configuration.Entries.Add(new EmoteGearEntry
             {
-                EmoteId = matched!.Value.RowId,
-                EmoteName = matched.Value.Name.ExtractText(),
+                EmoteId = emoteId,
+                EmoteName = emoteName,
                 TriggerDelaySeconds = 0f,
                 LocalPlayerOnly = true,
                 Enabled = true,
@@ -156,6 +192,7 @@ public class PluginUi
             this.plugin.Configuration.Save();
 
             this.newEmoteSearch = string.Empty;
+            this.newEmoteIdOverride = 0;
         }
 
         ImGui.EndDisabled();

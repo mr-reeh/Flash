@@ -44,7 +44,10 @@ Then find and install **Flash** from `/xlplugins`.
 2. Choose whether emotes strip you to **Smallclothes** or the **Emperor's
    Set**.
 3. Check or uncheck the slots you want Flash to actually change.
-4. Search for an emote by name and click **Add mapping**.
+4. Search for an emote by name and click **Add mapping**. If the search
+   grabs the wrong emote (short searches can match the wrong name), check
+   the Flash Debug Log for the exact ID and type it into the **Emote ID
+   override** field instead.
 5. Optionally set a **Delay** and/or **Duration** for that mapping.
 6. That's it - play the emote in-game and watch it happen.
 
