@@ -55,6 +55,11 @@ public sealed class Plugin : IDalamudPlugin
     // top of the normal animation-end detection, not a replacement for it.
     private readonly List<PendingForcedRevert> pendingForcedReverts = new();
 
+    // Full Glamourer state (not just gear) captured right before stripping, so it can be
+    // restored exactly instead of falling back to the character's real equipped gear -
+    // see RevertCharacterGear. Keyed by GameObjectId, cleared once restored/consumed.
+    private readonly Dictionary<ulong, string> savedGlamourerStates = new();
+
     private const string CommandName = "/emotegear";
 
     private readonly record struct PendingStrip(ulong GameObjectId, EmoteGearEntry Entry, DateTime StripAt);
@@ -357,8 +362,33 @@ public sealed class Plugin : IDalamudPlugin
             if (this.Configuration.DebugMode)
                 ChatGui.Print($"[Flash] ...animation changed, reverting '{target.Name.TextValue}'.");
 
-            this.Glamourer.Revert(target);
+            this.RevertCharacterGear(target, target.GameObjectId);
         }
+    }
+
+    /// <summary>
+    /// Restores whatever Glamourer state was captured right before Flash stripped this
+    /// character (preserving any pre-existing override like a gender swap), falling back
+    /// to a plain Revert (which discards overrides entirely) if no snapshot was captured
+    /// or restoring it fails.
+    /// </summary>
+    private void RevertCharacterGear(ICharacter character, ulong gameObjectId)
+    {
+        if (this.savedGlamourerStates.Remove(gameObjectId, out var savedState))
+        {
+            var restored = this.Glamourer.RestoreState(character, savedState);
+
+            if (this.Configuration.DebugMode)
+                ChatGui.Print($"[Flash] ...restored prior Glamourer state on '{character.Name.TextValue}' (success={restored}).");
+
+            if (restored)
+                return;
+
+            if (this.Configuration.DebugMode)
+                ChatGui.Print("[Flash] ...falling back to a plain revert (real equipped gear, not the prior Glamourer state).");
+        }
+
+        this.Glamourer.Revert(character);
     }
 
     private ICharacter? FindCharacterByName(string name)
@@ -419,6 +449,7 @@ public sealed class Plugin : IDalamudPlugin
                 // revert, just stop tracking them.
                 this.alteredCharacters.Remove(gameObjectId);
                 this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == gameObjectId);
+                this.savedGlamourerStates.Remove(gameObjectId);
                 continue;
             }
 
@@ -427,9 +458,9 @@ public sealed class Plugin : IDalamudPlugin
                 if (this.Configuration.DebugMode)
                     ChatGui.Print($"[Flash] ...animation finished on '{character.Name.TextValue}', reverting.");
 
-                this.Glamourer.Revert(character);
                 this.alteredCharacters.Remove(gameObjectId);
                 this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == gameObjectId);
+                this.RevertCharacterGear(character, gameObjectId);
             }
         }
     }
@@ -456,17 +487,23 @@ public sealed class Plugin : IDalamudPlugin
             if (!this.alteredCharacters.Remove(pending.GameObjectId))
                 continue; // Already reverted naturally - nothing to do.
 
+            var foundCharacter = false;
             foreach (var obj in ObjectTable)
             {
                 if (obj is ICharacter character && character.GameObjectId == pending.GameObjectId)
                 {
+                    foundCharacter = true;
+
                     if (this.Configuration.DebugMode)
                         ChatGui.Print($"[Flash] ...duration elapsed, force-reverting '{character.Name.TextValue}'.");
 
-                    this.Glamourer.Revert(character);
+                    this.RevertCharacterGear(character, pending.GameObjectId);
                     break;
                 }
             }
+
+            if (!foundCharacter)
+                this.savedGlamourerStates.Remove(pending.GameObjectId);
         }
     }
 
@@ -510,6 +547,21 @@ public sealed class Plugin : IDalamudPlugin
                     ChatGui.Print("[Flash] ...Glamourer isn't available, aborting.");
 
                 continue;
+            }
+
+            // Snapshot the character's current Glamourer state (any active gender/
+            // customization/design override, not just gear) before stripping, so it can
+            // be restored exactly later instead of falling back to their real equipped
+            // gear/body - see RevertCharacterGear.
+            var savedState = this.Glamourer.CaptureState(target);
+            if (savedState != null)
+            {
+                this.savedGlamourerStates[pending.GameObjectId] = savedState;
+            }
+            else if (this.Configuration.DebugMode)
+            {
+                ChatGui.Print("[Flash] ...couldn't capture the prior Glamourer state - will fall back to a " +
+                              "plain revert (real equipped gear) when this reverts.");
             }
 
             var stripped = this.Glamourer.StripAllGear(

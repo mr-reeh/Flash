@@ -94,6 +94,23 @@ Two complementary mechanisms decide when gear goes back to normal:
 `Plugin.cs` tracks which characters currently have Flash-altered gear (and
 which trigger type caused it) via `alteredCharacters`.
 
+**Reverting preserves any prior Glamourer state.** `RevertState` on its own
+discards any active Glamourer override entirely and reverts to the
+character's actual equipped gear/body - so if you'd used Glamourer to, say,
+swap genders, Flash's revert would silently undo that too. Instead,
+`GlamourerIpc.CaptureState` snapshots the character's full current Glamourer
+state right before stripping (`ProcessPendingStrips`), and all three revert
+paths above call `RevertCharacterGear`, which restores that exact snapshot
+via `GlamourerIpc.RestoreState` instead of calling `Revert`. If capturing or
+restoring the snapshot fails for any reason, it falls back to the old
+`Revert` (real equipped gear) behavior rather than leaving gear stuck.
+
+CaptureState/RestoreState use Glamourer's `GetStateBase64`/`ApplyState` IPC,
+confirmed to exist but not independently verified parameter-by-parameter the
+way `SetItem` was (see the confidence note in `GlamourerIpc.cs`) - if a
+runtime error shows up here, it's the same kind of one-round fix `SetItem`
+needed.
+
 ## Combat action triggers
 
 `ActionHook.cs` hooks `FFXIVClientStructs.FFXIV.Client.Game.ActionManager.UseAction`
