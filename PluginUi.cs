@@ -234,13 +234,13 @@ public class PluginUi
         if (!ImGui.BeginTable("EmoteGearTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             return;
 
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 20f);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 44f);
         ImGui.TableSetupColumn("On", ImGuiTableColumnFlags.WidthFixed, 28f);
         ImGui.TableSetupColumn("Trigger", ImGuiTableColumnFlags.WidthStretch, 3f);
         ImGui.TableSetupColumn("Delay (s)", ImGuiTableColumnFlags.WidthFixed, 90f);
-        ImGui.TableSetupColumn("Duration", ImGuiTableColumnFlags.WidthFixed, 30f);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30f);
         ImGui.TableSetupColumn("Duration (s)", ImGuiTableColumnFlags.WidthFixed, 90f);
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 60f);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 32f);
         ImGui.TableHeadersRow();
 
         var toRemove = -1;
@@ -251,24 +251,25 @@ public class PluginUi
             ImGui.PushID(i);
             ImGui.TableNextRow();
 
-            // Drag handle - click and drag vertically to reorder. Standard Dear ImGui
-            // reorderable-list pattern (drag-delta swap), not the payload drag-drop API.
+            // Reorder via up/down buttons - simpler and more reliable than drag-and-drop.
             ImGui.TableNextColumn();
-            ImGui.Selectable("::", false);
-            if (ImGui.IsItemActive() && !ImGui.IsItemHovered())
+            ImGui.BeginDisabled(i == 0);
+            if (ImGui.SmallButton("^"))
             {
-                var dragDelta = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
-                var targetIndex = i + (dragDelta < 0f ? -1 : 1);
-                if (targetIndex >= 0 && targetIndex < entries.Count)
-                {
-                    (entries[i], entries[targetIndex]) = (entries[targetIndex], entries[i]);
-                    ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
-                    this.plugin.Configuration.Save();
-                }
+                (entries[i], entries[i - 1]) = (entries[i - 1], entries[i]);
+                this.plugin.Configuration.Save();
             }
 
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Drag to reorder.");
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            ImGui.BeginDisabled(i == entries.Count - 1);
+            if (ImGui.SmallButton("v"))
+            {
+                (entries[i], entries[i + 1]) = (entries[i + 1], entries[i]);
+                this.plugin.Configuration.Save();
+            }
+
+            ImGui.EndDisabled();
 
             ImGui.TableNextColumn();
             var rowEnabled = entry.Enabled;
@@ -325,7 +326,7 @@ public class PluginUi
             ImGui.EndDisabled();
 
             ImGui.TableNextColumn();
-            if (ImGui.Button("Remove"))
+            if (ImGui.Button("X"))
                 toRemove = i;
 
             ImGui.PopID();
