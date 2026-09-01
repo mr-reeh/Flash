@@ -4,6 +4,8 @@ using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using LuminaAction = Lumina.Excel.Sheets.Action;
+using LuminaEmote = Lumina.Excel.Sheets.Emote;
 
 namespace Flash;
 
@@ -23,6 +25,16 @@ public sealed class Plugin : IDalamudPlugin
     public Configuration Configuration { get; }
     public GlamourerIpc Glamourer { get; }
     public PluginUi Ui { get; }
+    public DebugLogUi DebugLogWindow { get; }
+
+    /// <summary>Rolling log of every locally-detected emote/action with its exact ID and
+    /// resolved name, for finding IDs to enter in the manual override field. Populated
+    /// unconditionally (not gated by DebugMode) since this is a separate, dedicated tool.</summary>
+    public List<DebugLogEntry> DebugLog { get; } = new();
+
+    public const int MaxDebugLogEntries = 200;
+
+    public readonly record struct DebugLogEntry(DateTime Time, string Source, uint Id, string Name, bool Matched);
 
     private readonly EmoteWatcher emoteWatcher;
     private readonly EmoteHook emoteHook;
@@ -69,12 +81,16 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.Draw += this.Ui.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += () => this.Ui.IsOpen = true;
 
+        this.DebugLogWindow = new DebugLogUi(this);
+        PluginInterface.UiBuilder.Draw += this.DebugLogWindow.Draw;
+
         Framework.Update += this.OnFrameworkUpdate;
 
         CommandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(this.OnCommand)
         {
             HelpMessage = "Open the emote config window. '/emotegear toggle' enables/disables the plugin. " +
-                          "'/emotegear debug' toggles verbose logging of every emote detected, to chat and /xllog.",
+                          "'/emotegear debug' toggles verbose logging of every emote detected, to chat and /xllog. " +
+                          "'/emotegear log' opens the Flash Debug Log for finding emote/action IDs.",
         });
     }
 
@@ -100,6 +116,12 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
+        if (string.Equals(trimmed, "log", StringComparison.OrdinalIgnoreCase))
+        {
+            this.DebugLogWindow.IsOpen = !this.DebugLogWindow.IsOpen;
+            return;
+        }
+
         this.Ui.IsOpen = !this.Ui.IsOpen;
     }
 
@@ -110,6 +132,9 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     private void OnLocalPlayerEmoteExecuted(ushort emoteId)
     {
+        var match = this.FindMatchById(emoteId);
+        this.AddDebugLogEntry("Emote", emoteId, ResolveEmoteName(emoteId), match != null);
+
         if (this.Configuration.DebugMode)
         {
             var line = $"[Flash] native: local player used emote id {emoteId}";
@@ -134,7 +159,6 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        var match = this.FindMatchById(emoteId);
         this.HandleEmoteForCharacter(match, localPlayer);
     }
 
@@ -145,6 +169,9 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     private void OnLocalPlayerActionUsed(uint actionId)
     {
+        var match = this.FindMatchByActionId(actionId);
+        this.AddDebugLogEntry("Action", actionId, ResolveActionName(actionId), match != null);
+
         if (this.Configuration.DebugMode)
         {
             var line = $"[Flash] native: local player used action id {actionId}";
@@ -169,7 +196,6 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        var match = this.FindMatchByActionId(actionId);
         this.HandleEmoteForCharacter(match, localPlayer);
     }
 
@@ -228,6 +254,30 @@ public sealed class Plugin : IDalamudPlugin
 
         var match = this.FindMatchByText(messageText);
         this.HandleEmoteForCharacter(match, target);
+    }
+
+    private static string ResolveEmoteName(uint id)
+    {
+        var sheet = DataManager.GetExcelSheet<LuminaEmote>();
+        var row = sheet?.GetRowOrDefault(id);
+        var name = row?.Name.ExtractText();
+        return string.IsNullOrEmpty(name) ? "(unknown)" : name;
+    }
+
+    private static string ResolveActionName(uint id)
+    {
+        var sheet = DataManager.GetExcelSheet<LuminaAction>();
+        var row = sheet?.GetRowOrDefault(id);
+        var name = row?.Name.ExtractText();
+        return string.IsNullOrEmpty(name) ? "(unknown)" : name;
+    }
+
+    private void AddDebugLogEntry(string source, uint id, string name, bool matched)
+    {
+        this.DebugLog.Add(new DebugLogEntry(DateTime.UtcNow, source, id, name, matched));
+
+        if (this.DebugLog.Count > MaxDebugLogEntries)
+            this.DebugLog.RemoveAt(0);
     }
 
     private EmoteGearEntry? FindMatchById(ushort emoteId)
@@ -499,6 +549,7 @@ public sealed class Plugin : IDalamudPlugin
         Framework.Update -= this.OnFrameworkUpdate;
         CommandManager.RemoveHandler(CommandName);
         PluginInterface.UiBuilder.Draw -= this.Ui.Draw;
+        PluginInterface.UiBuilder.Draw -= this.DebugLogWindow.Draw;
 
         this.emoteWatcher.EmoteMessageSeen -= this.OnEmoteMessageSeen;
         this.emoteWatcher.Dispose();

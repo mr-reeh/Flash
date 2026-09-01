@@ -140,3 +140,14 @@ on, every emote Flash sees - native or chat-based - gets echoed to chat and
 `/xllog`, along with which step it passed or failed at (no match, Glamourer
 unavailable, per-slot results, etc.). Toggle it off once confirmed working,
 since it's noisy.
+
+For finding the exact ID of an emote or action to enter in the manual
+override field, use **`/emotegear log`** (or the "Debug Log" button in Flash
+Config) instead - it opens a dedicated, persistent window listing every
+locally-detected emote/action with its resolved name, real numeric ID, and
+whether it matched a configured entry, plus a Copy button per row. Unlike
+Debug Mode's chat echo, this is always recording in the background and
+doesn't need to be toggled on first - just use the emote/action, then check
+the log. Only covers local-player native detections (the ones that actually
+carry a numeric ID); chat-detected remote-player emotes aren't listed here
+since they never have one (see "How emote detection works").

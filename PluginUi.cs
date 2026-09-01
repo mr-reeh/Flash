@@ -15,6 +15,7 @@ public class PluginUi
     private TriggerType newTriggerType = TriggerType.Emote;
     private string newEmoteSearch = string.Empty;
     private string newActionSearch = string.Empty;
+    private int newActionIdOverride;
 
     public PluginUi(Plugin plugin)
     {
@@ -50,6 +51,13 @@ public class PluginUi
 
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Echoes every emote detected to chat, matched or not - use this to confirm detection is firing.");
+
+        ImGui.SameLine();
+        if (ImGui.Button("Debug Log"))
+            this.plugin.DebugLogWindow.IsOpen = true;
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Opens a log of every emote/action you've used with its exact ID - use it to find IDs for the manual override field.");
 
         var glamourerReady = this.plugin.Glamourer.IsAvailable();
         ImGui.SameLine();
@@ -196,17 +204,44 @@ public class PluginUi
             ImGui.TextColored(new Vector4(1f, 0.6f, 0.4f, 1f), "No exact match yet - keep typing.");
         }
 
-        ImGui.TextWrapped("Action mappings always use Duration (no animation to detect the end of) - " +
-                           "defaults to a brief 2s flash; adjust it in the table below after adding.");
+        ImGui.TextWrapped("The Action sheet has duplicate/legacy rows sharing the same name, so a text " +
+                           "search can grab the wrong one. If a mapping doesn't fire, turn on Debug mode, " +
+                           "use the action, and check chat/xllog for the real 'used action id' number - " +
+                           "then enter it directly below instead.");
 
-        ImGui.BeginDisabled(matched == null);
+        ImGui.SetNextItemWidth(120);
+        ImGui.InputInt("Action ID override (optional)", ref this.newActionIdOverride);
+
+        if (this.newActionIdOverride > 0 && sheet != null)
+        {
+            var overrideRow = sheet.GetRowOrDefault((uint)this.newActionIdOverride);
+            var overrideName = overrideRow?.Name.ExtractText() ?? "(unknown - not in Action sheet, will still be saved)";
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), $"Will use: {overrideName} (Id {this.newActionIdOverride})");
+        }
+
+        var hasOverride = this.newActionIdOverride > 0;
+        ImGui.BeginDisabled(matched == null && !hasOverride);
         if (ImGui.Button("Add mapping"))
         {
+            uint actionId;
+            string actionName;
+
+            if (hasOverride)
+            {
+                actionId = (uint)this.newActionIdOverride;
+                actionName = sheet?.GetRowOrDefault(actionId)?.Name.ExtractText() ?? $"Action {actionId}";
+            }
+            else
+            {
+                actionId = matched!.Value.RowId;
+                actionName = matched.Value.Name.ExtractText();
+            }
+
             this.plugin.Configuration.Entries.Add(new EmoteGearEntry
             {
                 TriggerType = TriggerType.Action,
-                ActionId = matched!.Value.RowId,
-                ActionName = matched.Value.Name.ExtractText(),
+                ActionId = actionId,
+                ActionName = actionName,
                 TriggerDelaySeconds = 0f,
                 UseDuration = true,
                 DurationSeconds = 2.0f,
@@ -216,6 +251,7 @@ public class PluginUi
             this.plugin.Configuration.Save();
 
             this.newActionSearch = string.Empty;
+            this.newActionIdOverride = 0;
         }
 
         ImGui.EndDisabled();
