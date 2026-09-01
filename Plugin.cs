@@ -26,18 +26,27 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly EmoteWatcher emoteWatcher;
     private readonly EmoteHook emoteHook;
+    private readonly ActionHook actionHook;
 
     // Emotes waiting out their trigger delay before gear gets stripped/swapped.
     private readonly List<PendingStrip> pendingStrips = new();
 
-    // Characters currently wearing Flash-altered gear, so a later unmatched emote knows
-    // to revert them. Gear persists until the animation actually changes to something
-    // not configured - there is no timer.
-    private readonly HashSet<ulong> alteredCharacters = new();
+    // Characters currently wearing Flash-altered gear, mapped to which trigger type
+    // caused it. Emote-triggered gear reverts via animation-end polling (see
+    // ProcessAlteredCharacters); Action-triggered gear has no animation state to poll,
+    // so it relies entirely on ProcessForcedReverts (Duration) instead - see
+    // ProcessPendingStrips, which forces UseDuration on for Action entries regardless of
+    // the checkbox, since otherwise it would never revert.
+    private readonly Dictionary<ulong, TriggerType> alteredCharacters = new();
+
+    // Scheduled forced reverts for entries with UseDuration=true - an early cutoff on
+    // top of the normal animation-end detection, not a replacement for it.
+    private readonly List<PendingForcedRevert> pendingForcedReverts = new();
 
     private const string CommandName = "/emotegear";
 
     private readonly record struct PendingStrip(ulong GameObjectId, EmoteGearEntry Entry, DateTime StripAt);
+    private readonly record struct PendingForcedRevert(ulong GameObjectId, DateTime RevertAt);
 
     public Plugin()
     {
@@ -52,6 +61,9 @@ public sealed class Plugin : IDalamudPlugin
 
         this.emoteHook = new EmoteHook(GameInteropProvider, Log);
         this.emoteHook.LocalPlayerEmoteExecuted += this.OnLocalPlayerEmoteExecuted;
+
+        this.actionHook = new ActionHook(GameInteropProvider, Log);
+        this.actionHook.LocalPlayerActionUsed += this.OnLocalPlayerActionUsed;
 
         this.Ui = new PluginUi(this);
         PluginInterface.UiBuilder.Draw += this.Ui.Draw;
@@ -127,6 +139,41 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     /// <summary>
+    /// Called from ActionHook whenever the local player uses any action - native hook,
+    /// exact numeric ActionId, fires the instant the game accepts the action (see the
+    /// caveat on ActionHook's UseAction hook about queued actions).
+    /// </summary>
+    private void OnLocalPlayerActionUsed(uint actionId)
+    {
+        if (this.Configuration.DebugMode)
+        {
+            var line = $"[Flash] native: local player used action id {actionId}";
+            Log.Information(line);
+            ChatGui.Print(line);
+        }
+
+        if (!this.Configuration.PluginEnabled)
+        {
+            if (this.Configuration.DebugMode)
+                ChatGui.Print("[Flash] ...ignored, plugin is disabled ('/emotegear toggle' to enable).");
+
+            return;
+        }
+
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            if (this.Configuration.DebugMode)
+                ChatGui.Print("[Flash] ...local player object unavailable, skipping.");
+
+            return;
+        }
+
+        var match = this.FindMatchByActionId(actionId);
+        this.HandleEmoteForCharacter(match, localPlayer);
+    }
+
+    /// <summary>
     /// Called from EmoteWatcher whenever a StandardEmote/CustomEmote line appears in
     /// chat. Local-player matches are skipped here - EmoteHook's native detection is
     /// authoritative for those, and both firing would double-handle the same emote. This
@@ -187,7 +234,18 @@ public sealed class Plugin : IDalamudPlugin
     {
         foreach (var entry in this.Configuration.Entries)
         {
-            if (entry.Enabled && entry.EmoteId == emoteId)
+            if (entry.Enabled && entry.TriggerType == TriggerType.Emote && entry.EmoteId == emoteId)
+                return entry;
+        }
+
+        return null;
+    }
+
+    private EmoteGearEntry? FindMatchByActionId(uint actionId)
+    {
+        foreach (var entry in this.Configuration.Entries)
+        {
+            if (entry.Enabled && entry.TriggerType == TriggerType.Action && entry.ActionId == actionId)
                 return entry;
         }
 
@@ -221,6 +279,7 @@ public sealed class Plugin : IDalamudPlugin
     private void HandleEmoteForCharacter(EmoteGearEntry? match, ICharacter target)
     {
         this.pendingStrips.RemoveAll(p => p.GameObjectId == target.GameObjectId);
+        this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == target.GameObjectId);
 
         if (match != null)
         {
@@ -243,6 +302,8 @@ public sealed class Plugin : IDalamudPlugin
 
         if (this.alteredCharacters.Remove(target.GameObjectId))
         {
+            this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == target.GameObjectId);
+
             if (this.Configuration.DebugMode)
                 ChatGui.Print($"[Flash] ...animation changed, reverting '{target.Name.TextValue}'.");
 
@@ -262,6 +323,104 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private void OnFrameworkUpdate(IFramework framework)
+    {
+        // Check animation-ended characters first (using state from before this tick's
+        // new strips are applied), so a character stripped this very frame isn't
+        // immediately re-checked and potentially reverted before the animation has had
+        // a chance to register as playing.
+        this.ProcessAlteredCharacters();
+        this.ProcessForcedReverts();
+        this.ProcessPendingStrips();
+    }
+
+    /// <summary>
+    /// Polls every Emote-triggered character with Flash-altered gear and reverts them
+    /// the moment their animation actually finishes (IsEmoting/IsInEmoteLoop both false)
+    /// - covers both a single emote playing out naturally and a looping emote being
+    /// cancelled by movement or re-triggering, without needing a timer. Action-triggered
+    /// characters are skipped here entirely (see the field comment on
+    /// alteredCharacters) - they have no animation state to poll and rely on
+    /// ProcessForcedReverts instead.
+    /// </summary>
+    private void ProcessAlteredCharacters()
+    {
+        if (this.alteredCharacters.Count == 0)
+            return;
+
+        // Snapshot - Revert below can mutate alteredCharacters mid-iteration.
+        foreach (var (gameObjectId, triggerType) in new Dictionary<ulong, TriggerType>(this.alteredCharacters))
+        {
+            if (triggerType != TriggerType.Emote)
+                continue;
+
+            ICharacter? character = null;
+            foreach (var obj in ObjectTable)
+            {
+                if (obj is ICharacter c && c.GameObjectId == gameObjectId)
+                {
+                    character = c;
+                    break;
+                }
+            }
+
+            if (character == null)
+            {
+                // Left the object table entirely (logged out, zoned, etc.) - nothing to
+                // revert, just stop tracking them.
+                this.alteredCharacters.Remove(gameObjectId);
+                this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == gameObjectId);
+                continue;
+            }
+
+            if (!NativeCharacterHelper.IsEmoting(character.Address))
+            {
+                if (this.Configuration.DebugMode)
+                    ChatGui.Print($"[Flash] ...animation finished on '{character.Name.TextValue}', reverting.");
+
+                this.Glamourer.Revert(character);
+                this.alteredCharacters.Remove(gameObjectId);
+                this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == gameObjectId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Force-reverts any character whose entry has UseDuration=true once DurationSeconds
+    /// has elapsed, even if the animation is still playing - lets a change be cut short
+    /// deliberately instead of always waiting for the animation to end naturally.
+    /// </summary>
+    private void ProcessForcedReverts()
+    {
+        if (this.pendingForcedReverts.Count == 0)
+            return;
+
+        var now = DateTime.UtcNow;
+        for (var i = this.pendingForcedReverts.Count - 1; i >= 0; i--)
+        {
+            var pending = this.pendingForcedReverts[i];
+            if (pending.RevertAt > now)
+                continue;
+
+            this.pendingForcedReverts.RemoveAt(i);
+
+            if (!this.alteredCharacters.Remove(pending.GameObjectId))
+                continue; // Already reverted naturally - nothing to do.
+
+            foreach (var obj in ObjectTable)
+            {
+                if (obj is ICharacter character && character.GameObjectId == pending.GameObjectId)
+                {
+                    if (this.Configuration.DebugMode)
+                        ChatGui.Print($"[Flash] ...duration elapsed, force-reverting '{character.Name.TextValue}'.");
+
+                    this.Glamourer.Revert(character);
+                    break;
+                }
+            }
+        }
+    }
+
+    private void ProcessPendingStrips()
     {
         if (this.pendingStrips.Count == 0)
             return;
@@ -315,7 +474,23 @@ public sealed class Plugin : IDalamudPlugin
                               $"({this.Configuration.StripMode}) returned success={stripped}.");
 
             if (stripped)
-                this.alteredCharacters.Add(pending.GameObjectId);
+            {
+                this.alteredCharacters[pending.GameObjectId] = pending.Entry.TriggerType;
+
+                // Action entries have no animation state to poll (see
+                // ProcessAlteredCharacters), so Duration is their only way back to
+                // normal - force it on regardless of the checkbox, using the configured
+                // DurationSeconds (or the field's own default if the user never touched
+                // it), so an Action mapping can never leave gear stuck permanently.
+                var useDuration = pending.Entry.UseDuration || pending.Entry.TriggerType == TriggerType.Action;
+
+                if (useDuration)
+                {
+                    this.pendingForcedReverts.Add(new PendingForcedRevert(
+                        pending.GameObjectId,
+                        DateTime.UtcNow.AddSeconds(pending.Entry.DurationSeconds)));
+                }
+            }
         }
     }
 
@@ -330,5 +505,8 @@ public sealed class Plugin : IDalamudPlugin
 
         this.emoteHook.LocalPlayerEmoteExecuted -= this.OnLocalPlayerEmoteExecuted;
         this.emoteHook.Dispose();
+
+        this.actionHook.LocalPlayerActionUsed -= this.OnLocalPlayerActionUsed;
+        this.actionHook.Dispose();
     }
 }

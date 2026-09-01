@@ -2,8 +2,9 @@
 
 Changes a character's gear (head/body/hands/legs/feet/ears/neck/wrists/rings)
 to either nothing ("Smallclothes") or the Emperor's New Set when a specified
-emote is used. Gear stays changed until the animation changes to something
-not configured - no timer. No Glamourer design pasting required.
+emote or combat action is used. Gear reverts once the animation finishes
+(emotes) or after a set duration (actions, or emotes with Duration enabled).
+No Glamourer design pasting required.
 
 ## Requirements
 
@@ -71,18 +72,47 @@ double-handle the same emote.
 
 ## Gear persistence model
 
-There's no revert timer. `Plugin.cs` tracks which characters currently have
-Flash-altered gear (`alteredCharacters`). Every time a *new* emote is
-detected for a tracked character:
+Two complementary mechanisms decide when gear goes back to normal:
 
-- If it matches a configured entry → (re)schedule a strip after that entry's
-  delay, replacing any still-pending strip for that character.
-- If it doesn't match anything → if that character was previously altered,
-  revert them to their real gear immediately.
+1. **Animation-end polling** (`NativeCharacterHelper.cs`, checked every frame
+   in `Plugin.cs`): reads `Character.EmoteController.IsEmoting()` /
+   `IsInEmoteLoop()` directly. The instant both go false for an
+   Emote-triggered altered character, gear reverts. This only applies to
+   Emote entries - Actions have no animation state to poll.
+2. **Duration** (optional per-entry, `UseDuration` + `DurationSeconds`):
+   force-reverts gear after a fixed time even if the animation is still
+   playing, letting you cut a change short deliberately. **Action entries
+   always use this regardless of the checkbox** - it's their only way back
+   to normal gear, since there's no emote animation to detect the end of.
+3. **Immediate revert on an unmatched new emote**: if a *different* emote is
+   detected for an already-altered character and it isn't configured, gear
+   reverts right away rather than waiting for polling to catch up.
 
-This means gear reverts as soon as you do an unmapped emote, but stays
-indefinitely through a looping emote (which never re-fires the hook) or if
-you just stop emoting without doing anything else.
+`Plugin.cs` tracks which characters currently have Flash-altered gear (and
+which trigger type caused it) via `alteredCharacters`.
+
+## Combat action triggers
+
+`ActionHook.cs` hooks `FFXIVClientStructs.FFXIV.Client.Game.ActionManager.UseAction`
+directly - the central entry point for the local player using any action
+(weaponskill, spell, item, mount, general action, etc.), confirmed against
+the user's installed `FFXIVClientStructs.dll`. It fires whenever the game
+accepts an action (the underlying call returns `true`).
+
+**Caveat** (from FFXIVClientStructs' own doc comment on `UseAction`): near a
+cooldown/animation-lock boundary the action gets *queued* rather than
+executed immediately, so this can fire slightly before the actual effect, or
+for something that ends up queued/cancelled. Fine for "flash briefly when
+Provoke is used," not frame-perfect for syncing to a specific VFX moment.
+
+Action entries have no animation state to poll (unlike emotes), so **Duration
+is always forced on for them** regardless of the checkbox - it's their only
+way back to normal gear. The Add-mapping UI defaults new Action entries to a
+2s Duration; adjust it in the table after adding.
+
+Pick Emote vs Action via the radio buttons above the search box in the Add
+row - both search their respective Lumina sheet (`Emote`/`Action`) by name,
+the same safe-lookup pattern either way.
 
 ## Known limitations / things to sanity-check yourself
 
