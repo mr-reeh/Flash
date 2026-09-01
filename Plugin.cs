@@ -4,6 +4,7 @@ using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using LuminaAction = Lumina.Excel.Sheets.Action;
 using LuminaEmote = Lumina.Excel.Sheets.Emote;
 
 namespace Flash;
@@ -37,13 +38,18 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly EmoteWatcher emoteWatcher;
     private readonly EmoteHook emoteHook;
+    private readonly ActionHook actionHook;
 
     // Emotes waiting out their trigger delay before gear gets stripped/swapped.
     private readonly List<PendingStrip> pendingStrips = new();
 
-    // Characters currently wearing Flash-altered gear, so a later unmatched emote or the
-    // animation-end poll knows to revert them.
-    private readonly HashSet<ulong> alteredCharacters = new();
+    // Characters currently wearing Flash-altered gear, mapped to which trigger type
+    // caused it. Emote-triggered gear reverts via animation-end polling (see
+    // ProcessAlteredCharacters); Action-triggered gear has no animation state to poll,
+    // so it relies entirely on ProcessForcedReverts (Duration) instead - see
+    // ProcessPendingStrips, which forces UseDuration on for Action entries regardless of
+    // the checkbox, since otherwise it would never revert.
+    private readonly Dictionary<ulong, TriggerType> alteredCharacters = new();
 
     // Scheduled forced reverts for entries with UseDuration=true - an early cutoff on
     // top of the normal animation-end detection, not a replacement for it.
@@ -73,6 +79,9 @@ public sealed class Plugin : IDalamudPlugin
         this.emoteHook = new EmoteHook(GameInteropProvider, Log);
         this.emoteHook.LocalPlayerEmoteExecuted += this.OnLocalPlayerEmoteExecuted;
 
+        this.actionHook = new ActionHook(GameInteropProvider, Log);
+        this.actionHook.LocalPlayerActionUsed += this.OnLocalPlayerActionUsed;
+
         this.Ui = new PluginUi(this);
         PluginInterface.UiBuilder.Draw += this.Ui.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += () => this.Ui.IsOpen = true;
@@ -85,7 +94,7 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(this.OnCommand)
         {
             HelpMessage = "Open the Flash config window. '/flash toggle' enables/disables the plugin. " +
-                          "'/flash log' opens the Flash Debug Log for finding emote IDs.",
+                          "'/flash log' opens the Flash Debug Log for finding emote/action IDs.",
         });
     }
 
@@ -119,6 +128,26 @@ public sealed class Plugin : IDalamudPlugin
     {
         var match = this.FindMatchById(emoteId);
         this.AddDebugLogEntry("Emote", emoteId, ResolveEmoteName(emoteId), match != null);
+
+        if (!this.Configuration.PluginEnabled)
+            return;
+
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null)
+            return;
+
+        this.HandleEmoteForCharacter(match, localPlayer);
+    }
+
+    /// <summary>
+    /// Called from ActionHook whenever the local player uses any action - native hook,
+    /// exact numeric ActionId, fires the instant the game accepts the action (see the
+    /// caveat on ActionHook's UseAction hook about queued actions).
+    /// </summary>
+    private void OnLocalPlayerActionUsed(uint actionId)
+    {
+        var match = this.FindMatchByActionId(actionId);
+        this.AddDebugLogEntry("Action", actionId, ResolveActionName(actionId), match != null);
 
         if (!this.Configuration.PluginEnabled)
             return;
@@ -173,6 +202,14 @@ public sealed class Plugin : IDalamudPlugin
         return string.IsNullOrEmpty(name) ? "(unknown)" : name;
     }
 
+    private static string ResolveActionName(uint id)
+    {
+        var sheet = DataManager.GetExcelSheet<LuminaAction>();
+        var row = sheet?.GetRowOrDefault(id);
+        var name = row?.Name.ExtractText();
+        return string.IsNullOrEmpty(name) ? "(unknown)" : name;
+    }
+
     private void AddDebugLogEntry(string source, uint id, string name, bool matched)
     {
         this.DebugLog.Add(new DebugLogEntry(DateTime.UtcNow, source, id, name, matched));
@@ -185,7 +222,18 @@ public sealed class Plugin : IDalamudPlugin
     {
         foreach (var entry in this.Configuration.Entries)
         {
-            if (entry.Enabled && entry.EmoteId == emoteId)
+            if (entry.Enabled && entry.TriggerType == TriggerType.Emote && entry.EmoteId == emoteId)
+                return entry;
+        }
+
+        return null;
+    }
+
+    private EmoteGearEntry? FindMatchByActionId(uint actionId)
+    {
+        foreach (var entry in this.Configuration.Entries)
+        {
+            if (entry.Enabled && entry.TriggerType == TriggerType.Action && entry.ActionId == actionId)
                 return entry;
         }
 
@@ -197,6 +245,7 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var entry in this.Configuration.Entries)
         {
             if (entry.Enabled
+                && entry.TriggerType == TriggerType.Emote
                 && !entry.LocalPlayerOnly
                 && !string.IsNullOrWhiteSpace(entry.EmoteName)
                 && messageText.Contains(entry.EmoteName, StringComparison.OrdinalIgnoreCase))
@@ -275,10 +324,13 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     /// <summary>
-    /// Polls every character with Flash-altered gear and reverts them the moment their
-    /// animation actually finishes (IsEmoting/IsInEmoteLoop both false) - covers both a
-    /// single emote playing out naturally and a looping emote being cancelled by
-    /// movement or re-triggering, without needing a timer.
+    /// Polls every Emote-triggered character with Flash-altered gear and reverts them
+    /// the moment their animation actually finishes (IsEmoting/IsInEmoteLoop both false)
+    /// - covers both a single emote playing out naturally and a looping emote being
+    /// cancelled by movement or re-triggering, without needing a timer. Action-triggered
+    /// characters are skipped here entirely (see the field comment on
+    /// alteredCharacters) - they have no animation state to poll and rely on
+    /// ProcessForcedReverts instead.
     /// </summary>
     private void ProcessAlteredCharacters()
     {
@@ -286,8 +338,11 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         // Snapshot - Revert below can mutate alteredCharacters mid-iteration.
-        foreach (var gameObjectId in new List<ulong>(this.alteredCharacters))
+        foreach (var (gameObjectId, triggerType) in new Dictionary<ulong, TriggerType>(this.alteredCharacters))
         {
+            if (triggerType != TriggerType.Emote)
+                continue;
+
             ICharacter? character = null;
             foreach (var obj in ObjectTable)
             {
@@ -400,9 +455,16 @@ public sealed class Plugin : IDalamudPlugin
 
             if (stripped)
             {
-                this.alteredCharacters.Add(pending.GameObjectId);
+                this.alteredCharacters[pending.GameObjectId] = pending.Entry.TriggerType;
 
-                if (pending.Entry.UseDuration)
+                // Action entries have no animation state to poll (see
+                // ProcessAlteredCharacters), so Duration is their only way back to
+                // normal - force it on regardless of the checkbox, using whatever
+                // DurationSeconds is configured (or the field's own default), so an
+                // Action mapping can never leave gear stuck permanently.
+                var useDuration = pending.Entry.UseDuration || pending.Entry.TriggerType == TriggerType.Action;
+
+                if (useDuration)
                 {
                     this.pendingForcedReverts.Add(new PendingForcedRevert(
                         pending.GameObjectId,
@@ -424,5 +486,8 @@ public sealed class Plugin : IDalamudPlugin
 
         this.emoteHook.LocalPlayerEmoteExecuted -= this.OnLocalPlayerEmoteExecuted;
         this.emoteHook.Dispose();
+
+        this.actionHook.LocalPlayerActionUsed -= this.OnLocalPlayerActionUsed;
+        this.actionHook.Dispose();
     }
 }

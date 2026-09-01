@@ -19,23 +19,45 @@ public enum StripMode
 }
 
 /// <summary>
-/// One emote -> gear mapping.
+/// What kind of game event triggers a mapping.
+/// </summary>
+public enum TriggerType
+{
+    /// <summary>An emote (via the emote wheel, /emote, or a macro).</summary>
+    Emote,
+
+    /// <summary>Using a combat/other action - see ActionHook.cs.</summary>
+    Action,
+}
+
+/// <summary>
+/// One trigger -> gear mapping.
 /// </summary>
 [Serializable]
 public class EmoteGearEntry
 {
-    /// <summary>Row/Id of the emote in Lumina's Emote sheet.</summary>
+    /// <summary>Whether this entry fires on an emote or an action.</summary>
+    public TriggerType TriggerType { get; set; } = TriggerType.Emote;
+
+    /// <summary>Row/Id of the emote in Lumina's Emote sheet. Used when TriggerType is Emote.</summary>
     public uint EmoteId { get; set; }
 
     /// <summary>Display name cached for the config UI (not authoritative, just convenience).</summary>
     public string EmoteName { get; set; } = string.Empty;
 
-    /// <summary>How long (seconds) to wait after the emote is detected before changing gear.</summary>
+    /// <summary>Row/Id of the action in Lumina's Action sheet. Used when TriggerType is Action.</summary>
+    public uint ActionId { get; set; }
+
+    /// <summary>Display name cached for the config UI (not authoritative, just convenience).</summary>
+    public string ActionName { get; set; } = string.Empty;
+
+    /// <summary>How long (seconds) to wait after the trigger is detected before changing gear.</summary>
     public float TriggerDelaySeconds { get; set; } = 0f;
 
     /// <summary>If true, gear is force-reverted after DurationSeconds even if the animation is
     /// still playing - use this to end a change early. If false, gear only reverts once the
-    /// animation actually finishes (see NativeCharacterHelper).</summary>
+    /// animation actually finishes (see NativeCharacterHelper). Action entries always behave
+    /// as if this is true, since there's no animation to detect the end of.</summary>
     public bool UseDuration { get; set; } = false;
 
     /// <summary>How long (seconds) to stay changed before force-reverting, if UseDuration is true.</summary>
@@ -53,7 +75,7 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 1;
 
-    /// <summary>All configured emote -> strip-gear mappings.</summary>
+    /// <summary>All configured trigger -> gear mappings.</summary>
     public List<EmoteGearEntry> Entries { get; set; } = new();
 
     /// <summary>Master on/off switch for the whole plugin.</summary>
