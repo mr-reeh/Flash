@@ -294,20 +294,19 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     /// <summary>
-    /// Restores whatever Glamourer state was captured right before Flash stripped this
-    /// character (preserving any pre-existing override like a gender swap), falling back
-    /// to a plain Revert (which discards overrides entirely) if no snapshot was captured
-    /// or restoring it fails.
+    /// Restores this character: any captured customization (gender/body/face) via
+    /// Glamourer's Customization-only apply, and the configured armor/accessory slots
+    /// via a direct read of the character's real equipped items + SetItem. Neither path
+    /// ever references weapon slots - see the confidence note on GlamourerIpc and
+    /// NativeInventoryHelper for why the old approach (a full Equipment+Customization
+    /// state apply) caused an unwanted weapon redraw.
     /// </summary>
     private void RevertCharacterGear(ICharacter character, ulong gameObjectId)
     {
         if (this.savedGlamourerStates.Remove(gameObjectId, out var savedState))
-        {
-            if (this.Glamourer.RestoreState(character, savedState))
-                return;
-        }
+            this.Glamourer.RestoreCustomization(character, savedState);
 
-        this.Glamourer.Revert(character);
+        this.Glamourer.RestoreGearSlots(character, this.Configuration.EnabledSlots);
     }
 
     private ICharacter? FindCharacterByName(string name)
