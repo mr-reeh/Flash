@@ -259,19 +259,23 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>
     /// Shared handling for both detection paths once a target character and (possibly
-    /// null) matched entry are known. If matched, schedules a strip. If not matched and
-    /// the character currently has Flash-altered gear, that means the animation changed
-    /// to something not configured, so gear is reverted immediately. Either way, any
-    /// still-pending strip for this character from a previous emote is cancelled first,
-    /// so a rapid animation change can't apply a stale strip after the fact.
+    /// null) matched entry are known. If matched, schedules a strip. If not matched:
+    /// only an Emote-triggered alteration reverts immediately here (switching to a
+    /// different, unmapped emote/animation cancels the effect). An Action-triggered
+    /// alteration is left alone and relies entirely on its Duration timer
+    /// (ProcessForcedReverts) instead - ActionHook fires for every action the player
+    /// uses, so reverting on any unmatched one would mean the very next auto-attack or
+    /// GCD cancels the effect almost immediately, defeating Duration entirely. A
+    /// still-pending strip for this character from a previous trigger is always
+    /// cancelled first, so a rapid change can't apply a stale strip after the fact.
     /// </summary>
     private void HandleEmoteForCharacter(EmoteGearEntry? match, ICharacter target)
     {
         this.pendingStrips.RemoveAll(p => p.GameObjectId == target.GameObjectId);
-        this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == target.GameObjectId);
 
         if (match != null)
         {
+            this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == target.GameObjectId);
             this.pendingStrips.Add(new PendingStrip(
                 target.GameObjectId,
                 match,
@@ -280,8 +284,13 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        if (this.alteredCharacters.Remove(target.GameObjectId))
+        if (this.alteredCharacters.TryGetValue(target.GameObjectId, out var currentTriggerType)
+            && currentTriggerType == TriggerType.Emote)
+        {
+            this.alteredCharacters.Remove(target.GameObjectId);
+            this.pendingForcedReverts.RemoveAll(p => p.GameObjectId == target.GameObjectId);
             this.RevertCharacterGear(target, target.GameObjectId);
+        }
     }
 
     /// <summary>
@@ -446,10 +455,17 @@ public sealed class Plugin : IDalamudPlugin
             // Snapshot the character's current Glamourer state (any active gender/
             // customization/design override, not just gear) before stripping, so it can
             // be restored exactly later instead of falling back to their real equipped
-            // gear/body - see RevertCharacterGear.
-            var savedState = this.Glamourer.CaptureState(target);
-            if (savedState != null)
-                this.savedGlamourerStates[pending.GameObjectId] = savedState;
+            // gear/body - see RevertCharacterGear. Only do this if the character isn't
+            // already altered - re-triggering the same (or another) mapped entry while
+            // still stripped would otherwise overwrite the true "before" snapshot with
+            // the current already-stripped state, so restoring later would just restore
+            // "naked" instead of the original appearance.
+            if (!this.alteredCharacters.ContainsKey(pending.GameObjectId))
+            {
+                var savedState = this.Glamourer.CaptureState(target);
+                if (savedState != null)
+                    this.savedGlamourerStates[pending.GameObjectId] = savedState;
+            }
 
             var stripped = this.Glamourer.StripAllGear(target, this.Configuration.StripMode, this.Configuration.EnabledSlots);
 
