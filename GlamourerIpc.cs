@@ -262,9 +262,36 @@ public class GlamourerIpc
             gzip.CopyTo(output);
             return System.Text.Encoding.UTF8.GetString(output.ToArray());
         }
+        catch
+        {
+            // Fall through to raw deflate attempt.
+        }
+
+        // Try raw DEFLATE (no gzip header) - GZipStream's "unsupported compression
+        // method" error specifically indicates missing/invalid gzip header bytes,
+        // suggesting this might be headerless deflate instead.
+        try
+        {
+            using var input = new System.IO.MemoryStream(bytes);
+            using var deflate = new System.IO.Compression.DeflateStream(input, System.IO.Compression.CompressionMode.Decompress);
+            using var output = new System.IO.MemoryStream();
+            deflate.CopyTo(output);
+            var decompressed = output.ToArray();
+
+            try
+            {
+                return System.Text.Encoding.UTF8.GetString(decompressed);
+            }
+            catch
+            {
+                return $"[Flash] Deflate decompressed to {decompressed.Length} bytes but they're not valid UTF8. " +
+                       $"First 64 bytes (hex): {Convert.ToHexString(decompressed, 0, Math.Min(64, decompressed.Length))}";
+            }
+        }
         catch (Exception ex)
         {
-            return $"[Flash] Neither plain UTF8 nor gzip decode worked. Raw byte count: {bytes.Length}. Gzip error: {ex.Message}";
+            return $"[Flash] Plain UTF8, gzip, and raw deflate all failed. Raw byte count: {bytes.Length}. " +
+                   $"Deflate error: {ex.Message}. First 64 bytes (hex): {Convert.ToHexString(bytes, 0, Math.Min(64, bytes.Length))}";
         }
     }
 
