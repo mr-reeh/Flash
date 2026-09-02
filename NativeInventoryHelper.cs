@@ -10,14 +10,15 @@ namespace Flash;
 /// set (like ApplyState with the Equipment flag) - that was reapplying weapon slots too
 /// as a side effect, causing an unwanted weapon redraw/VFX reset on every revert.
 ///
-/// CONFIDENCE NOTE: InventoryManager.GetInventoryContainer(InventoryType.EquippedItems)
-/// and the fixed EquippedItems slot ordering (MainHand, OffHand, Head, Body, Hands,
-/// Waist, Legs, Feet, Ears, Neck, Wrists, RFinger, LFinger, SoulCrystal) have been
-/// stable across the FFXIV plugin ecosystem for years and are used by many other
-/// plugins, but the exact current field names on InventoryItem were not independently
-/// re-verified against the user's installed FFXIVClientStructs.dll the way
-/// EmoteManager/ActionManager were. If this doesn't compile, "Go to Definition" on
-/// InventoryItem in the IDE will show the real current field names to swap in.
+/// CONFIDENCE NOTE: InventoryManager.GetInventoryContainer(InventoryType.EquippedItems),
+/// the fixed EquippedItems slot ordering (MainHand, OffHand, Head, Body, Hands, Waist,
+/// Legs, Feet, Ears, Neck, Wrists, RFinger, LFinger, SoulCrystal), and InventoryItem's
+/// ItemId/Stain fields are all confirmed - ItemId and the container plumbing compiled
+/// clean on the first try, and Stain was independently confirmed against Dalamud's own
+/// API docs after a build error showed the original guessed name (Stain0Id) was wrong.
+/// Stain2 (the second dye channel) follows Ottermandias's usual naming convention but
+/// wasn't independently re-verified the same way - if this doesn't compile, "Go to
+/// Definition" on InventoryItem in the IDE will show the real second field name.
 /// </summary>
 public static unsafe class NativeInventoryHelper
 {
@@ -53,8 +54,12 @@ public static unsafe class NativeInventoryHelper
             return false;
 
         itemId = item->ItemId;
-        stain0 = item->Stain0Id;
-        stain1 = item->Stain1Id;
+        // "Stain" confirmed directly from Dalamud's own API docs. "Stain2" (the second
+        // dye channel) follows Ottermandias's usual naming convention but wasn't
+        // independently verified the same way - if this doesn't compile, "Go to
+        // Definition" on InventoryItem will show the real second field name.
+        stain0 = item->Stain;
+        stain1 = item->Stain2;
         return true;
     }
 
