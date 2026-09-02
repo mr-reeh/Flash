@@ -94,7 +94,8 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(this.OnCommand)
         {
             HelpMessage = "Open the Flash config window. '/flash toggle' enables/disables the plugin. " +
-                          "'/flash log' opens the Flash Debug Log for finding emote/action IDs.",
+                          "'/flash log' opens the Flash Debug Log for finding emote/action IDs. " +
+                          "'/flash dumpstate' (temporary diagnostic) logs your decoded Glamourer state to /xllog.",
         });
     }
 
@@ -116,7 +117,40 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
+        if (string.Equals(trimmed, "dumpstate", StringComparison.OrdinalIgnoreCase))
+        {
+            this.DumpLocalPlayerState();
+            return;
+        }
+
         this.Ui.IsOpen = !this.Ui.IsOpen;
+    }
+
+    /// <summary>
+    /// TEMPORARY DIAGNOSTIC - captures the local player's current Glamourer state and
+    /// logs its decoded content to /xllog, so the real JSON schema can be confirmed
+    /// instead of guessed. See GlamourerIpc.DecodeStateForDiagnostics. Remove once the
+    /// schema is known and the real per-slot extractor is written.
+    /// </summary>
+    private void DumpLocalPlayerState()
+    {
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            ChatGui.Print("[Flash] No local player found.");
+            return;
+        }
+
+        var state = this.Glamourer.CaptureState(localPlayer);
+        if (state == null)
+        {
+            ChatGui.Print("[Flash] CaptureState failed - check /xllog for the warning/error.");
+            return;
+        }
+
+        var decoded = GlamourerIpc.DecodeStateForDiagnostics(state);
+        Log.Information($"[Flash] Decoded Glamourer state:\n{decoded}");
+        ChatGui.Print("[Flash] Decoded state dumped to /xllog - search for 'Decoded Glamourer state'.");
     }
 
     /// <summary>

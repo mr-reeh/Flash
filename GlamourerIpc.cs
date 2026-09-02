@@ -221,6 +221,54 @@ public class GlamourerIpc
     }
 
     /// <summary>
+    /// TEMPORARY DIAGNOSTIC - decodes a state string captured via CaptureState into
+    /// readable text, for figuring out its real JSON schema (needed to extract a single
+    /// slot's currently-displayed item without going through ApplyState, which triggers
+    /// an unconditional character redraw - see the KNOWN LIMITATION note on this class).
+    /// Tries plain UTF8 first, then gzip decompression, since it's unknown which
+    /// "GetStateBase64" actually produces. Remove once the schema is confirmed and the
+    /// real extractor is written.
+    /// </summary>
+    public static string DecodeStateForDiagnostics(string base64State)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(base64State);
+        }
+        catch (Exception ex)
+        {
+            return $"[Flash] Base64 decode failed: {ex.Message}";
+        }
+
+        // Try plain UTF8 JSON first.
+        try
+        {
+            var text = System.Text.Encoding.UTF8.GetString(bytes);
+            if (text.TrimStart().StartsWith('{') || text.TrimStart().StartsWith('['))
+                return text;
+        }
+        catch
+        {
+            // Fall through to gzip attempt.
+        }
+
+        // Try gzip-compressed JSON.
+        try
+        {
+            using var input = new System.IO.MemoryStream(bytes);
+            using var gzip = new System.IO.Compression.GZipStream(input, System.IO.Compression.CompressionMode.Decompress);
+            using var output = new System.IO.MemoryStream();
+            gzip.CopyTo(output);
+            return System.Text.Encoding.UTF8.GetString(output.ToArray());
+        }
+        catch (Exception ex)
+        {
+            return $"[Flash] Neither plain UTF8 nor gzip decode worked. Raw byte count: {bytes.Length}. Gzip error: {ex.Message}";
+        }
+    }
+
+    /// <summary>
     /// Captures the character's full current Glamourer state (any active design/
     /// customization/gender override, not just gear) as an opaque string, so it can be
     /// restored later via RestoreState. Returns null on failure - callers should fall
