@@ -3,7 +3,7 @@
     "Author": "MrReeh",
     "Name": "Flash",
     "InternalName": "Flash",
-    "AssemblyVersion": "0.3.0.0",
+    "AssemblyVersion": "0.4.0.0",
     "Description": "Automatically changes a character's gear via Glamourer to Smallclothes or the Emperor's New Set when specified emotes or combat actions are used, with per-slot control, delay, and duration options, then reverts back to normal gear.",
     "Punchline": "Automatically strips a character's gear to Smallclothes or the Emperor's Set when a specified emote or action is used.",
     "ApplicableVersion": "any",
@@ -16,6 +16,6 @@
     "DownloadLinkInstall": "https://github.com/mr-reeh/flash/releases/latest/download/latest.zip",
     "DownloadLinkUpdate": "https://github.com/mr-reeh/flash/releases/latest/download/latest.zip",
     "DownloadLinkTesting": "https://github.com/mr-reeh/flash/releases/latest/download/latest.zip",
-    "LastUpdate": "1788300740"
+    "LastUpdate": "1788360144"
   }
 ]

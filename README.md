@@ -19,10 +19,8 @@ back on its own afterward.
 - **Slots** - choose exactly which slots get changed (Head, Body, Hands,
   Legs, Feet, Earrings, Necklace, Bracelet, Left Ring, Right Ring) with
   individual checkboxes. Leave a slot unchecked and Flash won't touch it.
-  Flash never sets a weapon item itself, but restoring your appearance uses
-  Glamourer's own full-state apply, which as a side effect briefly redraws
-  your character (weapon included) - this is a known Glamourer behavior we
-  can't fully avoid without losing correctness elsewhere.
+  Weapons are never touched, and any Glamourer customization (like a gender
+  swap) survives a strip/revert cycle untouched.
 - **Delay** - if you don't want the change to happen the instant the trigger
   fires, set a delay (in seconds) and Flash will wait before changing
   anything.
