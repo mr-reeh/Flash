@@ -23,14 +23,18 @@ namespace Flash;
 /// List&lt;byte&gt;) tripped Dalamud's IPC JSON round-trip because Newtonsoft serializes
 /// byte[] as base64 instead of a JSON array.
 ///
-/// RestoreCustomization deliberately never passes ApplyFlag.Equipment - an earlier
-/// version restored the whole captured state (Equipment | Customization) via ApplyState,
-/// which worked for preserving things like a gender swap through a strip/revert cycle,
-/// but also reapplied the ENTIRE equipped-items block including weapons as a side
-/// effect, causing an unwanted weapon redraw/VFX reset on every revert. Gear itself is
-/// now restored separately via NativeInventoryHelper + SetItem (see
-/// Plugin.RevertCharacterGear), which reads/writes only the specific armor/accessory
-/// slots Flash actually touched and never references weapon slots at all.
+/// KNOWN LIMITATION - weapon redraw on revert: RestoreState (used to bring back the
+/// character's exact prior Glamourer appearance, including any armor overrides and
+/// customization/gender changes) uses ApplyState, and testing confirmed ApplyState
+/// triggers a full character redraw UNCONDITIONALLY - even a Customization-only call
+/// (no Equipment flag at all) still redrew weapons. Glamourer's own changelog
+/// independently confirms this ("the redraw done by Glamourer's ApplyState"). This
+/// appears to be an inherent side effect of Glamourer's current IPC, not something
+/// controllable via flags - an earlier attempt to avoid it by reading/restoring gear
+/// directly from game memory (bypassing ApplyState) fixed the weapon issue but at the
+/// cost of losing any Glamourer-specific armor overrides on revert, which was judged a
+/// worse trade-off. Correctness of the restored appearance is prioritized over avoiding
+/// the redraw.
 /// </summary>
 public class GlamourerIpc
 {
@@ -38,15 +42,19 @@ public class GlamourerIpc
 
     private readonly ApiVersion apiVersion;
     private readonly SetItem setItem;
+    private readonly RevertState revertState;
     private readonly GetStateBase64 getStateBase64;
     private readonly ApplyState applyState;
 
     private Dictionary<ApiEquipSlot, uint>? emperorsSetItemIds;
 
     /// <summary>
-    /// The equipment slots this plugin can strip/swap. Deliberately excludes MainHand/
-    /// OffHand (weapons) - Flash never reads or writes weapon slots anywhere. Which of
-    /// these are actually touched on a given strip is controlled by
+    /// The equipment slots this plugin strips/swaps via SetItem. Deliberately excludes
+    /// MainHand/OffHand (weapons) - Flash's own SetItem calls never touch weapon slots.
+    /// Note: restoring a captured state via RestoreState can still visually affect
+    /// weapons as an unconditional side effect of Glamourer's ApplyState (see the KNOWN
+    /// LIMITATION note on this class) - that isn't something this list controls. Which
+    /// of these are actually touched on a given strip is controlled by
     /// Configuration.EnabledSlots, not this list - this is the master set used to build
     /// the checkbox UI and as the default when EnabledSlots isn't yet configured.
     /// </summary>
@@ -103,6 +111,7 @@ public class GlamourerIpc
 
         this.apiVersion = new ApiVersion(pi);
         this.setItem = new SetItem(pi);
+        this.revertState = new RevertState(pi);
         this.getStateBase64 = new GetStateBase64(pi);
         this.applyState = new ApplyState(pi);
     }
@@ -213,9 +222,9 @@ public class GlamourerIpc
 
     /// <summary>
     /// Captures the character's full current Glamourer state (any active design/
-    /// customization/gender override, not just gear) as an opaque string, so the
-    /// customization portion can be restored later via RestoreCustomization.
-    /// Returns null on failure.
+    /// customization/gender override, not just gear) as an opaque string, so it can be
+    /// restored later via RestoreState. Returns null on failure - callers should fall
+    /// back to Revert in that case.
     /// </summary>
     public string? CaptureState(ICharacter target, uint lockKey = 0)
     {
@@ -237,13 +246,13 @@ public class GlamourerIpc
         }
     }
 
-    /// <summary>
-    /// Restores only the customization (body/gender/face) portion of a state string
-    /// previously captured via CaptureState - deliberately never passes
-    /// ApplyFlag.Equipment, so this cannot touch gear or weapons at all. Gear is
-    /// restored separately by RestoreGearSlots.
-    /// </summary>
-    public bool RestoreCustomization(ICharacter target, string state, uint lockKey = 0)
+    /// <summary>Restores a state string previously captured via CaptureState - the
+    /// character's exact prior appearance, including any armor-specific Glamourer
+    /// overrides and customization/gender changes. See the KNOWN LIMITATION note on this
+    /// class: this uses ApplyState, which triggers a full character redraw (weapons
+    /// included) unconditionally as an inherent side effect - not something these flags
+    /// can prevent. Returns false on failure - callers should fall back to Revert.</summary>
+    public bool RestoreState(ICharacter target, string state, uint lockKey = 0)
     {
         try
         {
@@ -251,11 +260,11 @@ public class GlamourerIpc
                 state,
                 target.ObjectIndex,
                 lockKey,
-                ApplyFlag.Once | ApplyFlag.Customization);
+                ApplyFlag.Once | ApplyFlag.Equipment | ApplyFlag.Customization);
 
             if (result != GlamourerApiEc.Success && result != GlamourerApiEc.NothingDone)
             {
-                this.log.Warning($"[Flash] Glamourer.ApplyState (customization) returned {result}");
+                this.log.Warning($"[Flash] Glamourer.ApplyState returned {result}");
                 return false;
             }
 
@@ -263,56 +272,31 @@ public class GlamourerIpc
         }
         catch (Exception ex)
         {
-            this.log.Error(ex, "[Flash] Failed to call Glamourer.ApplyState (customization)");
+            this.log.Error(ex, "[Flash] Failed to call Glamourer.ApplyState");
             return false;
         }
     }
 
-    /// <summary>
-    /// Restores each of <paramref name="slots"/> to the character's REAL equipped item
-    /// (read directly from game memory via NativeInventoryHelper, bypassing Glamourer),
-    /// then writes it back via SetItem. Never references weapon slots - slots is always
-    /// a subset of StrippableSlots. Trade-off: this restores the actual equipped item,
-    /// not a Glamourer-overridden appearance for that specific slot (see the note on
-    /// NativeInventoryHelper.TryGetEquippedItem).
-    /// </summary>
-    public bool RestoreGearSlots(ICharacter target, IEnumerable<ApiEquipSlot> slots, uint lockKey = 0, Action<string>? onSlotResult = null)
+    /// <summary>Reverts the given actor back to their real equipped gear, discarding any
+    /// active Glamourer override entirely. Fallback for when no state snapshot was
+    /// captured or RestoreState failed - prefer RestoreState when a snapshot exists.</summary>
+    public bool Revert(ICharacter target, uint lockKey = 0)
     {
-        var allSucceeded = true;
-
-        foreach (var slot in slots)
+        try
         {
-            if (!NativeInventoryHelper.TryGetEquippedItem(slot, out var itemId, out var stain0, out var stain1))
+            var result = this.revertState.Invoke(target.ObjectIndex, lockKey);
+            if (result != GlamourerApiEc.Success && result != GlamourerApiEc.NothingDone)
             {
-                this.log.Warning($"[Flash] Could not read real equipped item for slot {slot} - leaving as-is.");
-                onSlotResult?.Invoke($"{slot}: couldn't read real item, skipped");
-                allSucceeded = false;
-                continue;
+                this.log.Warning($"[Flash] Glamourer.RevertState returned {result}");
+                return false;
             }
 
-            try
-            {
-                var result = this.setItem.Invoke(target.ObjectIndex, slot, itemId, new List<byte> { stain0, stain1 }, lockKey);
-
-                if (result != GlamourerApiEc.Success && result != GlamourerApiEc.NothingDone)
-                {
-                    this.log.Warning($"[Flash] Glamourer.SetItem({slot}) (restore) returned {result}");
-                    onSlotResult?.Invoke($"{slot}: FAILED ({result})");
-                    allSucceeded = false;
-                }
-                else
-                {
-                    onSlotResult?.Invoke($"{slot}: ok ({result}, item {itemId})");
-                }
-            }
-            catch (Exception ex)
-            {
-                this.log.Error(ex, $"[Flash] Failed to call Glamourer.SetItem for slot {slot} (restore)");
-                onSlotResult?.Invoke($"{slot}: EXCEPTION ({ex.GetType().Name}: {ex.Message})");
-                allSucceeded = false;
-            }
+            return true;
         }
-
-        return allSucceeded;
+        catch (Exception ex)
+        {
+            this.log.Error(ex, "[Flash] Failed to call Glamourer.RevertState");
+            return false;
+        }
     }
 }
