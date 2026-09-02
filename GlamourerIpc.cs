@@ -221,16 +221,15 @@ public class GlamourerIpc
     }
 
     /// <summary>
-    /// TEMPORARY DIAGNOSTIC - decodes a state string captured via CaptureState into
-    /// readable text, for figuring out its real JSON schema (needed to extract a single
-    /// slot's currently-displayed item without going through ApplyState, which triggers
-    /// an unconditional character redraw - see the KNOWN LIMITATION note on this class).
-    /// Tries plain UTF8 first, then gzip decompression, since it's unknown which
-    /// "GetStateBase64" actually produces. Remove once the schema is confirmed and the
-    /// real extractor is written.
+    /// Decodes a state string captured via CaptureState into its underlying JSON.
+    /// Confirmed via a live dump: the base64-decoded bytes are a short prefix (byte 0
+    /// was 0x06 in testing - likely a format/version marker) followed immediately by a
+    /// standard gzip stream (magic bytes 1F 8B). This searches for that gzip header
+    /// rather than assuming a fixed prefix length, in case the prefix size varies.
     /// </summary>
-    public static string DecodeStateForDiagnostics(string base64State)
+    public static string? DecodeState(string base64State, out string? error)
     {
+        error = null;
         byte[] bytes;
         try
         {
@@ -238,61 +237,48 @@ public class GlamourerIpc
         }
         catch (Exception ex)
         {
-            return $"[Flash] Base64 decode failed: {ex.Message}";
+            error = $"Base64 decode failed: {ex.Message}";
+            return null;
         }
 
-        // Try plain UTF8 JSON first.
-        try
+        var gzipStart = -1;
+        for (var i = 0; i < bytes.Length - 1; i++)
         {
-            var text = System.Text.Encoding.UTF8.GetString(bytes);
-            if (text.TrimStart().StartsWith('{') || text.TrimStart().StartsWith('['))
-                return text;
-        }
-        catch
-        {
-            // Fall through to gzip attempt.
+            if (bytes[i] == 0x1F && bytes[i + 1] == 0x8B)
+            {
+                gzipStart = i;
+                break;
+            }
         }
 
-        // Try gzip-compressed JSON.
+        if (gzipStart < 0)
+        {
+            error = $"No gzip header (1F 8B) found anywhere in {bytes.Length} bytes. " +
+                    $"First 16 bytes (hex): {Convert.ToHexString(bytes, 0, Math.Min(16, bytes.Length))}";
+            return null;
+        }
+
         try
         {
-            using var input = new System.IO.MemoryStream(bytes);
+            using var input = new System.IO.MemoryStream(bytes, gzipStart, bytes.Length - gzipStart);
             using var gzip = new System.IO.Compression.GZipStream(input, System.IO.Compression.CompressionMode.Decompress);
             using var output = new System.IO.MemoryStream();
             gzip.CopyTo(output);
             return System.Text.Encoding.UTF8.GetString(output.ToArray());
         }
-        catch
-        {
-            // Fall through to raw deflate attempt.
-        }
-
-        // Try raw DEFLATE (no gzip header) - GZipStream's "unsupported compression
-        // method" error specifically indicates missing/invalid gzip header bytes,
-        // suggesting this might be headerless deflate instead.
-        try
-        {
-            using var input = new System.IO.MemoryStream(bytes);
-            using var deflate = new System.IO.Compression.DeflateStream(input, System.IO.Compression.CompressionMode.Decompress);
-            using var output = new System.IO.MemoryStream();
-            deflate.CopyTo(output);
-            var decompressed = output.ToArray();
-
-            try
-            {
-                return System.Text.Encoding.UTF8.GetString(decompressed);
-            }
-            catch
-            {
-                return $"[Flash] Deflate decompressed to {decompressed.Length} bytes but they're not valid UTF8. " +
-                       $"First 64 bytes (hex): {Convert.ToHexString(decompressed, 0, Math.Min(64, decompressed.Length))}";
-            }
-        }
         catch (Exception ex)
         {
-            return $"[Flash] Plain UTF8, gzip, and raw deflate all failed. Raw byte count: {bytes.Length}. " +
-                   $"Deflate error: {ex.Message}. First 64 bytes (hex): {Convert.ToHexString(bytes, 0, Math.Min(64, bytes.Length))}";
+            error = $"Found gzip header at offset {gzipStart} but decompression failed: {ex.Message}";
+            return null;
         }
+    }
+
+    /// <summary>TEMPORARY DIAGNOSTIC wrapper around DecodeState for /flash dumpstate -
+    /// returns the decoded JSON or an error string, never null, for easy logging.</summary>
+    public static string DecodeStateForDiagnostics(string base64State)
+    {
+        var decoded = DecodeState(base64State, out var error);
+        return decoded ?? $"[Flash] {error}";
     }
 
     /// <summary>
