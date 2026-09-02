@@ -329,18 +329,21 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>
     /// Restores whatever Glamourer state was captured right before Flash stripped this
-    /// character - their exact prior appearance, including any armor-specific overrides
-    /// and customization/gender changes - falling back to a plain Revert (real equipped
-    /// gear, no overrides preserved) if no snapshot was captured or restoring it fails.
-    /// Note: this uses Glamourer's ApplyState, which triggers a full character redraw
-    /// (weapons included) as an unconditional side effect - see the KNOWN LIMITATION
-    /// note on GlamourerIpc. Restoring the correct appearance is prioritized over
-    /// avoiding that redraw.
+    /// character. Three-tier fallback: RestoreGearFromState (reads each slot's ItemId/
+    /// Stain straight from the captured JSON, writes it back via SetItem - never touches
+    /// ApplyState/RevertState, so it never disturbs customization and never triggers
+    /// Glamourer's redraw) is tried first and should succeed in normal operation; if it
+    /// can't even decode/parse the captured state, falls back to RestoreState (full
+    /// ApplyState apply - does redraw, but keeps correctness); if that also fails, falls
+    /// back to a plain Revert (real equipped gear, no overrides preserved).
     /// </summary>
     private void RevertCharacterGear(ICharacter character, ulong gameObjectId)
     {
         if (this.savedGlamourerStates.Remove(gameObjectId, out var savedState))
         {
+            if (this.Glamourer.RestoreGearFromState(character, savedState, this.Configuration.EnabledSlots))
+                return;
+
             if (this.Glamourer.RestoreState(character, savedState))
                 return;
         }
