@@ -13,12 +13,10 @@ namespace Flash;
 /// CONFIDENCE NOTE: InventoryManager.GetInventoryContainer(InventoryType.EquippedItems),
 /// the fixed EquippedItems slot ordering (MainHand, OffHand, Head, Body, Hands, Waist,
 /// Legs, Feet, Ears, Neck, Wrists, RFinger, LFinger, SoulCrystal), and InventoryItem's
-/// ItemId/Stain fields are all confirmed - ItemId and the container plumbing compiled
-/// clean on the first try, and Stain was independently confirmed against Dalamud's own
-/// API docs after a build error showed the original guessed name (Stain0Id) was wrong.
-/// Stain2 (the second dye channel) follows Ottermandias's usual naming convention but
-/// wasn't independently re-verified the same way - if this doesn't compile, "Go to
-/// Definition" on InventoryItem in the IDE will show the real second field name.
+/// ItemId/Stains fields are all confirmed directly against the user's installed
+/// FFXIVClientStructs.dll via IDE decompilation - not guessed. Two earlier guesses at
+/// the stain field name (Stain0Id/Stain1Id, then Stain/Stain2) were both wrong; the real
+/// API is a Span&lt;byte&gt; property named Stains, indexed [0]/[1].
 /// </summary>
 public static unsafe class NativeInventoryHelper
 {
@@ -54,12 +52,11 @@ public static unsafe class NativeInventoryHelper
             return false;
 
         itemId = item->ItemId;
-        // "Stain" confirmed directly from Dalamud's own API docs. "Stain2" (the second
-        // dye channel) follows Ottermandias's usual naming convention but wasn't
-        // independently verified the same way - if this doesn't compile, "Go to
-        // Definition" on InventoryItem will show the real second field name.
-        stain0 = item->Stain;
-        stain1 = item->Stain2;
+        // Confirmed directly from the user's installed FFXIVClientStructs.dll: Stains
+        // is a Span<byte> property (backed by a 2-element fixed array), not separate
+        // scalar fields - accessed by index, not by name.
+        stain0 = item->Stains[0];
+        stain1 = item->Stains[1];
         return true;
     }
 
